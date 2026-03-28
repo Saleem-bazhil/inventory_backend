@@ -1,0 +1,7 @@
+.brand-image,
+.main-sidebar .brand-image,
+.login-logo img,
+.login-card-body img {
+    border-radius: 16px !important;
+    overflow: hidden;
+}

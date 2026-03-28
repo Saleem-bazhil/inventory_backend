@@ -1,0 +1,5 @@
+.brand-image,
+.login-logo img,
+.login-card-body img {
+    border-radius: 8px;
+}
