@@ -1,0 +1,401 @@
+/* ========================================
+   Jazzmin Custom Theme - Render Ways
+   Modern Clean Design
+======================================== */
+
+/* Import Google Fonts */
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
+
+/* Base Styles */
+:root {
+    --primary-pink: #EA266E;
+    --primary-pink-dark: #D41A5E;
+    --secondary-blue: #2E3186;
+    --secondary-blue-dark: #232569;
+    --text-dark: #1E1E1E;
+    --text-light: #6B6B6B;
+    --bg-white: #FFFFFF;
+    --border-light: #ADA4B5;
+    --bg-light-gray: #F8F9FA;
+    --row-alternate: #FAFAFA;
+}
+
+* {
+    font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+}
+
+body {
+    background: var(--bg-light-gray);
+    color: var(--text-dark);
+}
+
+/* ========================================
+   SIDEBAR STYLES
+======================================== */
+.wrapper .main-sidebar {
+    background: var(--secondary-blue) !important;
+    box-shadow: none !important;
+}
+
+.main-sidebar .sidebar {
+    background: var(--secondary-blue) !important;
+}
+
+/* Sidebar Menu Items */
+.nav-sidebar .nav-item .nav-link {
+    color: rgba(255, 255, 255, 0.85) !important;
+    padding: 0.75rem 1rem;
+    margin: 0.25rem 0;
+    border-radius: 0;
+    transition: background-color 0.2s ease;
+}
+
+/* Active Menu Item */
+.nav-sidebar .nav-item .nav-link.active {
+    background: var(--primary-pink) !important;
+    color: white !important;
+    border-left: 4px solid white;
+}
+
+/* Hover Effect - No Animation */
+.nav-sidebar .nav-item .nav-link:hover:not(.active) {
+    background: rgba(255, 255, 255, 0.1) !important;
+    color: white !important;
+}
+
+/* Sidebar Brand */
+.brand-link {
+    background: var(--secondary-blue-dark) !important;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+/* Sidebar Icons */
+.nav-sidebar .nav-icon {
+    color: rgba(255, 255, 255, 0.7);
+}
+
+/* ========================================
+   TOP NAVBAR STYLES
+======================================== */
+.main-header.navbar {
+    background: var(--bg-white) !important;
+    border-bottom: 1px solid var(--border-light);
+    box-shadow: none !important;
+}
+
+/* Navbar Links */
+.navbar-nav .nav-link {
+    color: var(--text-dark) !important;
+}
+
+.navbar-nav .nav-link:hover {
+    color: var(--primary-pink) !important;
+}
+
+/* Search Bar */
+.form-control {
+    border: 1px solid var(--border-light) !important;
+    border-radius: 6px !important;
+    padding: 0.5rem 1rem;
+    font-size: 0.875rem;
+    transition: border-color 0.2s ease;
+}
+
+.form-control:focus {
+    border-color: var(--primary-pink) !important;
+    box-shadow: none !important;
+}
+
+/* Search Button */
+.input-group .btn {
+    border: 1px solid var(--border-light);
+    color: var(--text-dark);
+}
+
+.input-group .btn:hover {
+    background: var(--bg-light-gray);
+    color: var(--primary-pink);
+}
+
+/* ========================================
+   CARDS / SECTIONS
+======================================== */
+.card {
+    background: var(--bg-white);
+    border: 1px solid var(--border-light);
+    border-radius: 8px;
+    box-shadow: none !important;
+    margin-bottom: 1.5rem;
+}
+
+.card-header {
+    background: transparent;
+    border-bottom: 1px solid var(--border-light);
+    padding: 1rem 1.25rem;
+}
+
+.card-header h3,
+.card-header .card-title {
+    color: var(--text-dark);
+    font-weight: 600;
+    font-size: 1.125rem;
+    position: relative;
+    padding-bottom: 0.5rem;
+}
+
+.card-header .card-title::after {
+    content: '';
+    position: absolute;
+    bottom: -0.5rem;
+    left: 0;
+    width: 40px;
+    height: 2px;
+    background: var(--primary-pink);
+}
+
+.card-body {
+    padding: 1.25rem;
+}
+
+/* ========================================
+   BUTTON STYLES
+======================================== */
+/* Primary Button */
+.btn-primary,
+.btn-primary:focus {
+    background: var(--primary-pink) !important;
+    border-color: var(--primary-pink) !important;
+    color: white !important;
+    border-radius: 6px;
+    padding: 0.5rem 1.25rem;
+    font-weight: 500;
+    transition: background-color 0.2s ease;
+}
+
+.btn-primary:hover {
+    background: var(--primary-pink-dark) !important;
+    border-color: var(--primary-pink-dark) !important;
+    transform: none !important;
+}
+
+/* Secondary Button */
+.btn-secondary,
+.btn-default {
+    background: var(--secondary-blue) !important;
+    border-color: var(--secondary-blue) !important;
+    color: white !important;
+    border-radius: 6px;
+    transition: background-color 0.2s ease;
+}
+
+.btn-secondary:hover,
+.btn-default:hover {
+    background: var(--secondary-blue-dark) !important;
+    border-color: var(--secondary-blue-dark) !important;
+    transform: none !important;
+}
+
+/* Danger Button */
+.btn-danger {
+    background: #dc3545 !important;
+    border-color: #dc3545 !important;
+}
+
+/* ========================================
+   TABLES / DATA STYLES
+======================================== */
+.table {
+    border-collapse: separate;
+    border-spacing: 0;
+}
+
+.table thead th {
+    color: var(--secondary-blue);
+    font-weight: 600;
+    border-bottom: 2px solid var(--border-light);
+    padding: 1rem;
+}
+
+.table tbody tr {
+    transition: background-color 0.2s ease;
+}
+
+.table tbody tr:nth-child(even) {
+    background-color: var(--row-alternate);
+}
+
+.table tbody tr:hover {
+    background-color: rgba(234, 38, 110, 0.05);
+}
+
+/* Action Buttons in Tables */
+.table .btn {
+    padding: 0.25rem 0.5rem;
+    font-size: 0.75rem;
+}
+
+.table .btn-warning {
+    background: var(--primary-pink);
+    color: white;
+    border: none;
+}
+
+.table .btn-warning:hover {
+    background: var(--primary-pink-dark);
+}
+
+/* ========================================
+   FORM STYLES
+======================================== */
+.form-group label {
+    color: var(--text-dark);
+    font-weight: 500;
+    margin-bottom: 0.5rem;
+}
+
+.form-control {
+    border-radius: 6px;
+}
+
+/* ========================================
+   RECENT ACTIVITY HIGHLIGHTS
+======================================== */
+.list-group-item {
+    border-left: 3px solid transparent;
+    padding: 1rem;
+}
+
+.list-group-item:before {
+    content: '';
+    display: inline-block;
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    margin-right: 0.75rem;
+}
+
+/* Activity Indicators */
+.list-group-item.recent {
+    border-left-color: var(--primary-pink);
+}
+
+.list-group-item.recent:before {
+    background: var(--primary-pink);
+}
+
+.list-group-item.pending:before {
+    background: var(--secondary-blue);
+}
+
+/* Timestamps */
+.text-muted small {
+    color: var(--text-light) !important;
+    font-size: 0.75rem;
+}
+
+/* ========================================
+   DASHBOARD SPECIFIC
+======================================== */
+.info-box {
+    background: var(--bg-white);
+    border: 1px solid var(--border-light);
+    border-radius: 8px;
+    box-shadow: none !important;
+    margin-bottom: 1rem;
+}
+
+.info-box-icon {
+    border-radius: 6px;
+}
+
+.info-box .info-box-number {
+    color: var(--primary-pink);
+    font-weight: 600;
+}
+
+/* ========================================
+   LOGIN PAGE
+======================================== */
+.login-page {
+    background: linear-gradient(135deg, var(--bg-white) 0%, var(--bg-light-gray) 100%);
+}
+
+.login-box .card {
+    border-radius: 12px;
+    padding: 2rem;
+}
+
+.login-box .btn-primary {
+    width: 100%;
+}
+
+/* ========================================
+   UTILITY CLASSES
+======================================== */
+/* Section Grouping */
+.app-group {
+    margin-bottom: 2rem;
+}
+
+.app-group .card-header {
+    background: var(--bg-light-gray);
+    border-bottom: 2px solid var(--primary-pink);
+}
+
+/* Spacing Improvements */
+.content-wrapper {
+    padding: 1.5rem;
+}
+
+.main-footer {
+    border-top: 1px solid var(--border-light);
+    background: var(--bg-white);
+    padding: 1rem;
+}
+
+/* ========================================
+   PAGINATION
+======================================== */
+.pagination .page-item .page-link {
+    color: var(--secondary-blue);
+    border: 1px solid var(--border-light);
+    margin: 0 2px;
+    border-radius: 4px;
+}
+
+.pagination .page-item.active .page-link {
+    background: var(--primary-pink);
+    border-color: var(--primary-pink);
+    color: white;
+}
+
+/* ========================================
+   MODALS
+======================================== */
+.modal-content {
+    border-radius: 8px;
+    border: none;
+    box-shadow: none;
+}
+
+.modal-header {
+    border-bottom: 1px solid var(--border-light);
+    background: var(--bg-white);
+}
+
+.modal-footer {
+    border-top: 1px solid var(--border-light);
+}
+
+/* ========================================
+   RESPONSIVE ADJUSTMENTS
+======================================== */
+@media (max-width: 768px) {
+    .content-wrapper {
+        padding: 1rem;
+    }
+    
+    .card-body {
+        padding: 1rem;
+    }
+}
