@@ -1,7 +1,8 @@
 from django.db import models
-
+from django.contrib.auth.models import User
 class MaterialTrack(models.Model):
     # --- Customer & Order Information ---
+    user = models.ForeignKey(User, on_delete=models.CASCADE, null=True, blank=True)
     cust_name = models.CharField(max_length=255, verbose_name="Customer Name")
     cust_contact = models.CharField(max_length=100, verbose_name="Customer Contact", blank=True, null=True)
     case_id = models.CharField(max_length=100, verbose_name="Case ID", unique=True)
