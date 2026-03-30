@@ -108,19 +108,15 @@ UNFOLD = {
     "SITE_HEADER": "RenderWays",
     "SITE_SUBHEADER": "Inventory Management",
     "SITE_SYMBOL": "inventory_2",
-    "SITE_LOGO": {
-        "light": "/static/books/img/logo-mark.svg",
-        "dark": "/static/books/img/logo-mark.svg",
-    },
     "SITE_ICON": {
-        "light": "/static/books/img/logo-mark.svg",
-        "dark": "/static/books/img/logo-mark.svg",
+        "light": "/static/books/img/logo.png",
+        "dark": "/static/books/img/logo.png",
     },
     "SHOW_HISTORY": True,
     "SHOW_VIEW_ON_SITE": False,
-    "STYLES": [
-        "/static/books/css/admin-custom.css",
-    ],
+    # "STYLES": [
+    #     "/static/books/css/admin-custom.css",
+    # ],
     "SITE_DROPDOWN": [
         {
             "title": "Dashboard",
