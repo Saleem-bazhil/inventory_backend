@@ -1,7 +1,131 @@
+:root {
+    --rw-pink: #f01976;
+    --rw-pink-deep: #d80d66;
+    --rw-indigo: #343393;
+    --rw-indigo-deep: #23235f;
+    --rw-ink: #18181d;
+    --rw-surface: #f7f7fb;
+    --rw-border: rgba(52, 51, 147, 0.12);
+    --rw-shadow: 0 18px 45px rgba(35, 35, 95, 0.08);
+}
+
+body {
+    background:
+        radial-gradient(circle at top right, rgba(240, 25, 118, 0.08), transparent 28%),
+        radial-gradient(circle at top left, rgba(52, 51, 147, 0.08), transparent 24%),
+        var(--rw-surface);
+}
+
+#main {
+    background: transparent !important;
+}
+
+#nav-sidebar,
+#nav-sidebar-inner {
+    background: linear-gradient(180deg, var(--rw-indigo-deep) 0%, var(--rw-indigo) 58%, #262668 100%) !important;
+    border-right: 0 !important;
+}
+
+#nav-sidebar .border-base-200,
+#nav-sidebar .dark\:border-base-800 {
+    border-color: rgba(255, 255, 255, 0.12) !important;
+}
+
+#nav-sidebar,
+#nav-sidebar * {
+    color: rgba(255, 255, 255, 0.9);
+}
+
+#nav-sidebar a:hover,
+#nav-sidebar [x-on\:click]:hover {
+    background: rgba(255, 255, 255, 0.08) !important;
+    color: #fff !important;
+}
+
+#nav-sidebar a.active {
+    background: linear-gradient(90deg, rgba(240, 25, 118, 0.2), rgba(255, 255, 255, 0.08)) !important;
+    border-left: 3px solid var(--rw-pink);
+    color: #fff !important;
+}
+
+#nav-sidebar h2,
+#nav-sidebar .text-font-important-light,
+#nav-sidebar .dark\:text-font-important-dark {
+    color: #fff !important;
+}
+
 .brand-image,
-.main-sidebar .brand-image,
 .login-logo img,
-.login-card-body img {
-    border-radius: 16px !important;
+.login-card-body img,
+[alt="Home"] {
+    border-radius: 14px !important;
     overflow: hidden;
+}
+
+.bg-white,
+.dark\:bg-base-900,
+.dark\:bg-base-800,
+.bg-base-50 {
+    transition: background-color 0.2s ease, box-shadow 0.2s ease, border-color 0.2s ease;
+}
+
+#header,
+.border-base-200.bg-white,
+.bg-white.border-b,
+.bg-white.border {
+    border-color: var(--rw-border) !important;
+}
+
+.bg-white.rounded-default,
+.bg-white.border,
+.dark\:bg-base-900.rounded-default,
+.dark\:bg-base-900.border {
+    box-shadow: var(--rw-shadow);
+}
+
+a,
+.text-primary-600,
+.dark\:text-primary-500 {
+    color: var(--rw-indigo);
+}
+
+a:hover,
+.hover\:text-primary-600:hover,
+.dark\:hover\:text-primary-500:hover {
+    color: var(--rw-pink) !important;
+}
+
+button,
+.button,
+[type="submit"],
+.bg-primary-600,
+.hover\:bg-primary-700:hover {
+    border-radius: 12px !important;
+}
+
+.bg-primary-600,
+.hover\:bg-primary-700:hover,
+button[type="submit"],
+input[type="submit"] {
+    background: linear-gradient(135deg, var(--rw-pink), var(--rw-pink-deep)) !important;
+    border-color: transparent !important;
+    color: #fff !important;
+    box-shadow: 0 10px 24px rgba(240, 25, 118, 0.22);
+}
+
+.focus\:ring-primary-500:focus,
+.focus\:ring-primary-500:focus-visible,
+input:focus,
+select:focus,
+textarea:focus {
+    border-color: rgba(240, 25, 118, 0.35) !important;
+    box-shadow: 0 0 0 4px rgba(240, 25, 118, 0.12) !important;
+}
+
+table thead th {
+    color: var(--rw-indigo) !important;
+}
+
+.rounded-default {
+    border-radius: 16px !important;
 }
