@@ -1,10 +1,11 @@
 from django.contrib import admin
+from unfold.admin import ModelAdmin
 
 from .models import MaterialTrack
 
 
 @admin.register(MaterialTrack)
-class MaterialTrackAdmin(admin.ModelAdmin):
+class MaterialTrackAdmin(ModelAdmin):
     list_display = (
         "case_id",
         "cust_name",
@@ -17,6 +18,7 @@ class MaterialTrackAdmin(admin.ModelAdmin):
     )
     search_fields = ("case_id", "cust_name", "cust_contact", "product", "part_number")
     list_filter = ("warranty", "used_part", "user", "in_date", "out_date")
+    list_filter_submit = True
 
     def get_queryset(self, request):
         queryset = super().get_queryset(request)

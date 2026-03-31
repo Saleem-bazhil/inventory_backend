@@ -1,7 +1,297 @@
-.brand-image,
-.main-sidebar .brand-image,
-.login-logo img,
-.login-card-body img {
+:root {
+    --rw-pink: #f4267e;
+    --rw-pink-strong: #de156f;
+    --rw-pink-soft: #fff1f7;
+    --rw-indigo: #343393;
+    --rw-indigo-strong: #232a4a;
+    --rw-indigo-deep: #141a32;
+    --rw-sky: #5f69f3;
+    --rw-text: #20263d;
+    --rw-text-soft: #66708b;
+    --rw-surface: #ffffff;
+    --rw-surface-strong: #ffffff;
+    --rw-app-bg: #f5f7fe;    --rw-border: rgba(0, 0, 0, 0.08);
+}
+
+html.dark,
+:root.dark,
+[data-theme="dark"] {
+    --rw-text: #edf2ff;
+    --rw-text-soft: #b9c5e6;
+    --rw-surface: rgba(19, 25, 45, 0.86);
+    --rw-surface-strong: #161d36;
+    --rw-app-bg: #0d1223;    --rw-border: rgba(140, 157, 214, 0.18);
+}
+
+body {
+    color: var(--rw-text);
+    background:
+        var(--rw-app-bg) !important;
+}
+
+html.dark body,
+[data-theme="dark"] body {
+    background:
+        var(--rw-app-bg) !important;
+}
+
+body,
+button,
+input,
+select,
+textarea {
+    font-family: "Segoe UI", "Manrope", "Trebuchet MS", sans-serif;
+}
+
+#main,
+.content,
+.container,
+.max-w-screen-2xl {
+    background: transparent !important;
+}
+
+#header,
+header,
+.sticky.top-0 {
+    backdrop-filter: none; /* Remove blur for solid background */
+    background: #ffffff !important;
+    border-bottom: 1px solid var(--rw-border) !important;
+}
+
+html.dark #header,
+html.dark header,
+html.dark .sticky.top-0,
+[data-theme="dark"] #header,
+[data-theme="dark"] header,
+[data-theme="dark"] .sticky.top-0 {
+    background: rgba(15, 20, 36, 0.76) !important;
+}
+
+#nav-sidebar,
+#nav-sidebar-inner {
+    background-color: var(--rw-indigo-deep) !important; /* Using a solid dark color from the original gradient */
+    border-right: 0 !important;
+}
+
+#nav-sidebar .border-base-200,
+#nav-sidebar .dark\:border-base-800 {
+    border-color: rgba(255, 255, 255, 0.12) !important;
+}
+
+#nav-sidebar,
+#nav-sidebar * {
+    color: rgba(241, 244, 255, 0.92) !important;
+}
+
+#nav-sidebar a,
+#nav-sidebar [x-on\:click] {
+    border-radius: 14px;
+    transition: background-color 0.2s ease, transform 0.2s ease, color 0.2s ease;
+}
+
+#nav-sidebar a:hover,
+#nav-sidebar [x-on\:click]:hover {
+    background: rgba(255, 255, 255, 0.08) !important;
+    color: #fff !important;
+}
+
+#nav-sidebar a.active {
+    background-color: rgba(95, 105, 243, 0.28) !important; /* Solid color from the original gradient */
+    border-left: 3px solid var(--rw-pink);
+    color: #fff !important;
+}
+
+.sidebar-brand .brand-link .sidebar-brand-text {
+    font-size: 1.4rem;
+    font-weight: 600;
+    color: #fff !important;
+}
+.bg-white,
+.bg-base-50,
+.dark\:bg-base-900,
+.dark\:bg-base-800,
+.border-base-200,
+.dark\:border-base-800,
+.rounded-default,
+.rounded-lg,
+.rounded-xl {
+    transition: background-color 0.25s ease, box-shadow 0.25s ease, border-color 0.25s ease;
+}
+
+.bg-white,
+.bg-base-50,
+.border-base-200.bg-white,
+.bg-white.border,
+.bg-white.border-b,
+.bg-base-50.border,
+.dark\:bg-base-900,
+.dark\:bg-base-800 {
+    background: var(--rw-surface) !important;
+    border-color: var(--rw-border) !important;
+}
+
+html.dark .bg-base-900,
+html.dark .bg-base-800,
+html.dark .dark\:bg-base-900,
+html.dark .dark\:bg-base-800,
+[data-theme="dark"] .bg-base-900,
+[data-theme="dark"] .bg-base-800,
+[data-theme="dark"] .dark\:bg-base-900,
+[data-theme="dark"] .dark\:bg-base-800 {
+    background: var(--rw-surface-strong) !important;
+}
+
+.rounded-default,
+.rounded-lg,
+.rounded-xl {
+    border-radius: 18px !important;
+}
+
+a,
+.text-primary-600,
+.dark\:text-primary-500,
+.text-font-important-light {
+    color: var(--rw-indigo);
+}
+
+html.dark a,
+html.dark .text-primary-600,
+html.dark .dark\:text-primary-500,
+[data-theme="dark"] a,
+[data-theme="dark"] .text-primary-600,
+[data-theme="dark"] .dark\:text-primary-500 {
+    color: #9cb0ff;
+}
+
+a:hover,
+.hover\:text-primary-600:hover,
+.dark\:hover\:text-primary-500:hover {
+    color: var(--rw-indigo) !important;
+}
+
+button,
+.button,
+[type="submit"],
+[type="button"],
+.bg-primary-600,
+.hover\:bg-primary-700:hover {
+    border-radius: 12px !important;
+}
+
+.bg-primary-600,
+.hover\:bg-primary-700:hover,
+button[type="submit"],
+input[type="submit"],
+.button, /* Keep this for general buttons */
+.submit-row input {
+    background-color: var(--rw-indigo) !important; /* Using a solid color */
+    border: 0 !important;
+    color: #fff !important;
+}
+
+.submit-row .deletelink,
+.submit-row a.deletelink {
+    background-color: #34406b !important; /* Using a solid color */
+    color: #fff !important;
+}
+
+.focus\:ring-primary-500:focus,
+.focus\:ring-primary-500:focus-visible,
+input:focus,
+select:focus,
+textarea:focus {
+    border-color: rgba(95, 105, 243, 0.35) !important;
+    box-shadow: 0 0 0 4px rgba(95, 105, 243, 0.14) !important;
+}
+
+input,
+select,
+textarea {
+    border-radius: 12px !important;
+    border-color: var(--rw-border) !important;
+}
+
+table {
+    border-collapse: separate;
+    border-spacing: 0;
+}
+
+table thead th,
+thead th {
+    color: var(--rw-indigo) !important;
+    background-color: rgba(246, 248, 255, 0.98) !important; /* Using a solid color */
+}
+
+html.dark table thead th,
+html.dark thead th,
+[data-theme="dark"] table thead th,
+[data-theme="dark"] thead th {
+    color: #dbe4ff !important;
+    background-color: rgba(22, 29, 54, 0.98) !important; /* Using a solid color */
+}
+
+tbody tr:hover,
+.results tbody tr:hover {
+    background: rgba(95, 105, 243, 0.06) !important;
+}
+
+html.dark tbody tr:hover,
+html.dark .results tbody tr:hover,
+[data-theme="dark"] tbody tr:hover,
+[data-theme="dark"] .results tbody tr:hover {
+    background: rgba(156, 176, 255, 0.08) !important;
+}
+
+.module caption,
+.inline-group h2,
+.messagelist .success,
+.messagelist .warning,
+.messagelist .error {
     border-radius: 16px !important;
-    overflow: hidden;
+}
+
+.messagelist .success {
+    background: rgba(34, 197, 94, 0.12) !important;
+    border-color: rgba(34, 197, 94, 0.22) !important;
+}
+
+.messagelist .warning {
+    background: rgba(245, 158, 11, 0.12) !important;
+    border-color: rgba(245, 158, 11, 0.22) !important;
+}
+
+.messagelist .error {
+    background: rgba(239, 68, 68, 0.12) !important;
+    border-color: rgba(239, 68, 68, 0.22) !important;
+}
+
+.login,
+.login #container {
+    background: transparent !important;
+}
+
+.login .form-row,
+.login .submit-row,
+.login .card,
+.login .bg-white,
+.login .dark\:bg-base-900 {
+    background: var(--rw-surface) !important;
+}
+
+.login .submit-row {
+    border-top: 1px solid var(--rw-border) !important;
+}
+
+.object-tools a,
+.button.default,
+.button,
+.selector-chosen h2,
+.selector-available h2 {
+    border-radius: 12px !important;
+}
+
+.breadcrumbs,
+.paginator,
+.actions {
+    color: var(--rw-text-soft) !important;
 }
