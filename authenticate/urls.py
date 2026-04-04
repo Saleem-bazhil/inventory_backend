@@ -1,8 +1,10 @@
-# urls.py
 from django.urls import path
-from .views import LoginAPIView
+
+from .views import LoginView, MeView, RefreshView, RegisterView
 
 urlpatterns = [
-    # ... your other urls ...
-    path('login/', LoginAPIView.as_view(), name='api-login'),
+    path("register/", RegisterView.as_view(), name="register"),
+    path("login/", LoginView.as_view(), name="login"),
+    path("refresh/", RefreshView.as_view(), name="token-refresh"),
+    path("me/", MeView.as_view(), name="me"),
 ]

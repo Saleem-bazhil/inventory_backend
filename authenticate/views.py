@@ -1,45 +1,59 @@
-from django.contrib.auth import authenticate
-from rest_framework.generics import GenericAPIView
+from rest_framework import generics, permissions, status
 from rest_framework.response import Response
-from rest_framework import status
-from rest_framework.authtoken.models import Token
-from rest_framework.permissions import AllowAny
-from .serializers import LoginSerializer
+from rest_framework.views import APIView
+from rest_framework_simplejwt.tokens import RefreshToken
+from rest_framework_simplejwt.views import TokenRefreshView
 
-class LoginAPIView(GenericAPIView):
-    permission_classes = [AllowAny]
-    authentication_classes = []
-    serializer_class = LoginSerializer
+from .serializers import AuthUserSerializer, LoginSerializer, RegisterSerializer, UpdateProfileSerializer
 
-    def get(self, request):
-        return Response(
-            {
-                "detail": "Use POST to log in.",
-                "accepted_fields": ["username", "password"],
-            },
-            status=status.HTTP_200_OK,
-        )
 
-    def post(self, request):
+def build_auth_response(user):
+    refresh = RefreshToken.for_user(user)
+    return {
+        "access": str(refresh.access_token),
+        "refresh": str(refresh),
+        "user": AuthUserSerializer(user).data,
+    }
+
+
+class RegisterView(generics.CreateAPIView):
+    serializer_class = RegisterSerializer
+    permission_classes = [permissions.AllowAny]
+
+    def create(self, request, *args, **kwargs):
         serializer = self.get_serializer(data=request.data)
         serializer.is_valid(raise_exception=True)
-        username = serializer.validated_data["username"]
-        password = serializer.validated_data["password"]
+        user = serializer.save()
+        return Response(build_auth_response(user), status=status.HTTP_201_CREATED)
 
-        user = authenticate(username=username, password=password)
 
-        if user is not None:
-            token, created = Token.objects.get_or_create(user=user)
+class LoginView(APIView):
+    permission_classes = [permissions.AllowAny]
 
-            return Response({
-                "token": token.key,
-                "user_id": user.pk,
-                "username": user.username,
-                "email": user.email,
-                "message": "Login successful!"
-            }, status=status.HTTP_200_OK)
+    def post(self, request):
+        serializer = LoginSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        return Response(build_auth_response(serializer.validated_data), status=status.HTTP_200_OK)
 
-        return Response(
-            {"error": "Invalid username or password."},
-            status=status.HTTP_401_UNAUTHORIZED
-        )
+
+class MeView(APIView):
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get(self, request):
+        return Response(AuthUserSerializer(request.user).data, status=status.HTTP_200_OK)
+
+    def put(self, request):
+        serializer = UpdateProfileSerializer(request.user, data=request.data)
+        serializer.is_valid(raise_exception=True)
+        serializer.save()
+        return Response(AuthUserSerializer(request.user).data, status=status.HTTP_200_OK)
+
+    def patch(self, request):
+        serializer = UpdateProfileSerializer(request.user, data=request.data, partial=True)
+        serializer.is_valid(raise_exception=True)
+        serializer.save()
+        return Response(AuthUserSerializer(request.user).data, status=status.HTTP_200_OK)
+
+
+class RefreshView(TokenRefreshView):
+    permission_classes = [permissions.AllowAny]
