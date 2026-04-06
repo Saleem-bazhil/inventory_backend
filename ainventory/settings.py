@@ -93,6 +93,7 @@ DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 
 REST_FRAMEWORK = {
     "DEFAULT_AUTHENTICATION_CLASSES": [
+        "rest_framework_simplejwt.authentication.JWTAuthentication",
         "rest_framework.authentication.TokenAuthentication",
     ],
     "DEFAULT_PERMISSION_CLASSES": [
@@ -101,6 +102,10 @@ REST_FRAMEWORK = {
 }
 
 CORS_ALLOW_ALL_ORIGINS = True
+
+# Fast2SMS configuration
+# Get your API key from https://www.fast2sms.com/
+FAST2SMS_API_KEY = "ihUR6HeXIvCc1ZK0jkrTun9F7BAMSDb4mtl5YO2oWPpdg8EsfNVJczFE04qLbSND8s17gjRxwnHai2B3"  # TODO: Set your Fast2SMS API key here
 
 
 UNFOLD = {
