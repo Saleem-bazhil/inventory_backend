@@ -67,6 +67,27 @@ class RefreshView(TokenRefreshView):
     permission_classes = [permissions.AllowAny]
 
 
+# ── Engineers list (for assignment dropdowns) ──────────────────────
+
+class EngineersListView(APIView):
+    """Return all active users who can be assigned to tickets."""
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get(self, request):
+        users = User.objects.filter(is_active=True).exclude(
+            pk=request.user.pk,  # exclude the requester
+        ).select_related("userprofile")
+
+        data = []
+        for u in users:
+            profile = getattr(u, "userprofile", None)
+            role = profile.role if profile else "engineer"
+            name = u.get_full_name() or u.username
+            data.append({"id": u.id, "full_name": name, "role": role})
+
+        return Response(data)
+
+
 # ── Super Admin: manage sub-admins ──────────────────────────────────
 
 
