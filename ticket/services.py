@@ -100,6 +100,16 @@ def get_available_transitions(ticket, actor_role):
     available = []
     for t in transitions:
         if actor_role in t["roles"]:
+            # Prevent closed → under_observation loop:
+            # If ticket was already under observation, don't allow it again.
+            if (
+                ticket.current_status == "closed"
+                and t["to"] == "under_observation"
+                and TicketTimeline.objects.filter(
+                    ticket=ticket, status="under_observation"
+                ).exists()
+            ):
+                continue
             available.append(t)
     return available
 
