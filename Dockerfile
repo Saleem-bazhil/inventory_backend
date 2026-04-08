@@ -21,7 +21,8 @@ RUN pip install --upgrade pip && \
 
 COPY . .
 
-RUN mkdir -p /app/staticfiles && \
+RUN chmod +x entrypoint.sh && \
+    mkdir -p /app/staticfiles && \
     python manage.py collectstatic --noinput
 
 RUN chown -R app:app /app
@@ -30,8 +31,4 @@ USER app
 
 EXPOSE 7000
 
-CMD ["gunicorn", "ainventory.wsgi:application", \
-     "--bind", "0.0.0.0:7000", \
-     "--workers", "3", \
-     "--threads", "2", \
-     "--timeout", "120"]
+CMD ["./entrypoint.sh"]
