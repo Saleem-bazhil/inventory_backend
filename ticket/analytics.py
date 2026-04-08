@@ -92,7 +92,7 @@ class DashboardOverviewView(APIView):
         else:
             avg_resolution_hrs = 0.0
 
-        # Specific workflow counts
+        # Specific workflow counts (overall)
         assigned_count = qs.filter(current_assignee__isnull=False).exclude(current_status="closed").count()
         unassigned_count = qs.filter(current_assignee__isnull=True).exclude(current_status="closed").count()
         in_progress_count = by_status.get("in_progress", 0) + by_status.get("diagnosis", 0) + by_status.get("assigned", 0)
@@ -103,6 +103,26 @@ class DashboardOverviewView(APIView):
         cx_pending_count = by_status.get("cx_pending", 0)
         completed_count = by_status.get("closed", 0)
 
+        # Warranty breakdown (overall)
+        warranty_count = qs.filter(service_type="warranty").exclude(current_status="closed").count()
+        out_of_warranty_count = qs.exclude(service_type="warranty").exclude(current_status="closed").count()
+
+        # Today's breakdown
+        today_qs = qs.filter(created_at__gte=today_start)
+        today_warranty = today_qs.filter(service_type="warranty").count()
+        today_out_of_warranty = today_qs.exclude(service_type="warranty").count()
+        today_assigned = today_qs.filter(current_assignee__isnull=False).exclude(current_status="closed").count()
+        today_unassigned = today_qs.filter(current_assignee__isnull=True).exclude(current_status="closed").count()
+
+        today_by_status = {}
+        for row in today_qs.values("current_status").annotate(count=Count("id")):
+            today_by_status[row["current_status"]] = row["count"]
+
+        today_part_pending = today_by_status.get("part_requested", 0)
+        today_part_order_pending = today_by_status.get("cx_approved", 0) + today_by_status.get("part_ordered", 0)
+        today_part_quote_pending = today_by_status.get("part_approved", 0) + today_by_status.get("quotation_sent", 0)
+        today_cx_pending = today_by_status.get("cx_pending", 0)
+
         overview = {
             "total_tickets": total,
             "by_status": by_status,
@@ -112,7 +132,7 @@ class DashboardOverviewView(APIView):
             "avg_resolution_hrs": avg_resolution_hrs,
             "tickets_today": tickets_today,
             "closed_today": closed_today,
-            # Specific KPI counts
+            # Overall KPI counts
             "assigned_count": assigned_count,
             "unassigned_count": unassigned_count,
             "in_progress_count": in_progress_count,
@@ -122,6 +142,17 @@ class DashboardOverviewView(APIView):
             "ready_to_dispatch_count": ready_to_dispatch_count,
             "cx_pending_count": cx_pending_count,
             "completed_count": completed_count,
+            "warranty_count": warranty_count,
+            "out_of_warranty_count": out_of_warranty_count,
+            # Today's KPI counts
+            "today_warranty": today_warranty,
+            "today_out_of_warranty": today_out_of_warranty,
+            "today_assigned": today_assigned,
+            "today_unassigned": today_unassigned,
+            "today_part_pending": today_part_pending,
+            "today_part_order_pending": today_part_order_pending,
+            "today_part_quote_pending": today_part_quote_pending,
+            "today_cx_pending": today_cx_pending,
         }
 
         # Region breakdown (admin only)
