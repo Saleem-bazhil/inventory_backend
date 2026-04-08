@@ -1,37 +1,29 @@
 FROM python:3.11-slim
 
-# Environment variables
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     PIP_NO_CACHE_DIR=1 \
     PIP_DISABLE_PIP_VERSION_CHECK=1 \
     DJANGO_SETTINGS_MODULE=ainventory.settings
 
-# Set work directory
 WORKDIR /app
 
-# Install system dependencies (important for psycopg2, Pillow, etc.)
-RUN apt-get update && apt-get install -y \
+RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential \
     libpq-dev \
-    && apt-get clean
+    && rm -rf /var/lib/apt/lists/*
 
-# Create non-root user
 RUN addgroup --system app && adduser --system --ingroup app app
 
-# Install Python dependencies
-COPY requirements.txt .
+COPY requirement.txt .
 RUN pip install --upgrade pip && \
     pip install -r requirement.txt
 
-# Copy project
 COPY . .
 
-# Create static directory BEFORE collectstatic
 RUN mkdir -p /app/staticfiles && \
     python manage.py collectstatic --noinput
 
-# Set ownership
 RUN chown -R app:app /app
 
 USER app
