@@ -28,10 +28,10 @@ RUN chown -R app:app /app
 
 USER app
 
-EXPOSE 8000
+EXPOSE 7000
 
 CMD ["gunicorn", "ainventory.wsgi:application", \
-     "--bind", "0.0.0.0:8000", \
+     "--bind", "0.0.0.0:7000", \
      "--workers", "3", \
      "--threads", "2", \
      "--timeout", "120"]
