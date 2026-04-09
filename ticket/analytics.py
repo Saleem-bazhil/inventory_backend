@@ -93,8 +93,8 @@ class DashboardOverviewView(APIView):
             avg_resolution_hrs = 0.0
 
         # Specific workflow counts (overall)
-        assigned_count = qs.filter(current_assignee__isnull=False).exclude(current_status="closed").count()
-        unassigned_count = qs.filter(current_assignee__isnull=True).exclude(current_status="closed").count()
+        assigned_count = qs.filter(assigned_engineer__isnull=False).exclude(current_status="closed").count()
+        unassigned_count = qs.filter(assigned_engineer__isnull=True).exclude(current_status="closed").count()
         in_progress_count = by_status.get("in_progress", 0) + by_status.get("diagnosis", 0) + by_status.get("assigned", 0)
         part_pending_count = by_status.get("part_requested", 0)
         part_order_pending_count = by_status.get("cx_approved", 0) + by_status.get("part_ordered", 0)
@@ -111,8 +111,8 @@ class DashboardOverviewView(APIView):
         today_qs = qs.filter(created_at__gte=today_start)
         today_warranty = today_qs.filter(service_type="warranty").count()
         today_out_of_warranty = today_qs.exclude(service_type="warranty").count()
-        today_assigned = today_qs.filter(current_assignee__isnull=False).exclude(current_status="closed").count()
-        today_unassigned = today_qs.filter(current_assignee__isnull=True).exclude(current_status="closed").count()
+        today_assigned = today_qs.filter(assigned_engineer__isnull=False).exclude(current_status="closed").count()
+        today_unassigned = today_qs.filter(assigned_engineer__isnull=True).exclude(current_status="closed").count()
 
         today_by_status = {}
         for row in today_qs.values("current_status").annotate(count=Count("id")):
