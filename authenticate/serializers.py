@@ -3,7 +3,7 @@ from django.contrib.auth.models import User
 from rest_framework.exceptions import AuthenticationFailed
 from rest_framework import serializers
 
-from .models import UserProfile
+from .models import Engineer, UserProfile
 
 UserModel = get_user_model()
 
@@ -126,6 +126,47 @@ class SubAdminSerializer(serializers.Serializer):
         profile.region = region
         profile.save(update_fields=["role", "region"])
         return user
+
+
+# ---------------------------------------------------------------------------
+# Engineer
+# ---------------------------------------------------------------------------
+
+class EngineerSerializer(serializers.ModelSerializer):
+    region_display = serializers.CharField(source="get_region_display", read_only=True)
+    status_display = serializers.CharField(source="get_status_display", read_only=True)
+    created_by_name = serializers.SerializerMethodField()
+
+    class Meta:
+        model = Engineer
+        fields = [
+            "id", "name", "email", "phone", "region", "region_display",
+            "status", "status_display", "created_by", "created_by_name",
+            "created_at", "updated_at",
+        ]
+        read_only_fields = ["id", "created_by", "created_at", "updated_at"]
+
+    def get_created_by_name(self, obj):
+        if obj.created_by:
+            return obj.created_by.get_full_name() or obj.created_by.username
+        return None
+
+
+class EngineerCreateUpdateSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Engineer
+        fields = ["name", "email", "phone", "region", "status"]
+
+    def validate_name(self, value):
+        if not value or not value.strip():
+            raise serializers.ValidationError("Engineer name is required.")
+        return value.strip()
+
+    def validate_region(self, value):
+        valid_regions = [r[0] for r in UserProfile.REGION_CHOICES]
+        if value not in valid_regions:
+            raise serializers.ValidationError(f"'{value}' is not a valid region.")
+        return value
 
 
 class LoginSerializer(serializers.Serializer):

@@ -1,6 +1,8 @@
 from django.urls import path
 
 from .views import (
+    EngineerDetailView,
+    EngineerListCreateView,
     EngineersListView,
     LoginView,
     MeView,
@@ -17,4 +19,7 @@ urlpatterns = [
     path("me/", MeView.as_view(), name="me"),
     path("sub-admins/", SubAdminListCreateView.as_view(), name="sub-admin-list"),
     path("sub-admins/<int:pk>/", SubAdminDetailView.as_view(), name="sub-admin-detail"),
+    # Engineer management
+    path("engineers/", EngineerListCreateView.as_view(), name="engineer-list"),
+    path("engineers/<int:pk>/", EngineerDetailView.as_view(), name="engineer-detail"),
 ]

@@ -9,7 +9,7 @@ from rest_framework import permissions, status
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from authenticate.models import UserProfile
+from authenticate.models import Engineer, UserProfile
 # OTP disabled — uncomment when SMS provider is available
 # from material.sms import send_otp_sms, verify_otp
 
@@ -39,24 +39,20 @@ logger = logging.getLogger(__name__)
 
 def get_user_role(user):
     """
-    Map the existing UserProfile.role to the ticket workflow roles.
+    Map the logged-in user's profile role to a workflow role.
 
-    TODO: Once you assign proper roles (manager, engineer, receptionist, cc_team)
-    via the admin panel, update this mapping to be strict:
-        "super_admin": "admin",
-        "sub_admin": "engineer",
-        "manager": "manager", etc.
-    For now, both super_admin and sub_admin map to 'admin' so all users
-    can perform all workflow transitions during development/testing.
+    Important: this returns the ACTOR's role (the person performing the
+    action), never the role of the engineer being assigned.
+    sub_admin / super_admin are regional admins with full workflow control.
     """
     profile = getattr(user, "userprofile", None)
     if not profile:
         return "admin"
-    # Use effective_role if available (new role system), otherwise map legacy
-    role = getattr(profile, "effective_role", None) or profile.role
+
+    role = profile.role
     role_map = {
         "super_admin": "admin",
-        "sub_admin": "admin",  # temporary: give full access until roles are assigned
+        "sub_admin": "admin",
         "admin": "admin",
         "manager": "manager",
         "engineer": "engineer",
@@ -334,20 +330,46 @@ class TicketTransitionView(APIView):
         to_status = serializer.validated_data["to_status"]
         comment = serializer.validated_data.get("comment", "")
         assignee_id = serializer.validated_data.get("assignee_id")
+        engineer_id = serializer.validated_data.get("engineer_id")
 
         actor = request.user
         actor_role = get_user_role(actor)
 
-        # On 'assigned' transition, set the assignee
-        if to_status == "assigned" and assignee_id:
-            try:
-                assignee = User.objects.get(pk=assignee_id)
-                ticket.current_assignee = assignee
-            except User.DoesNotExist:
+        # On 'assigned' transition, validate and set the engineer
+        if to_status == "assigned":
+            if not engineer_id and not assignee_id:
                 return Response(
-                    {"detail": f"Assignee user {assignee_id} not found."},
+                    {"detail": "An engineer must be selected for assignment."},
                     status=status.HTTP_400_BAD_REQUEST,
                 )
+
+            eid = engineer_id or assignee_id
+            try:
+                engineer = Engineer.objects.get(pk=eid)
+            except Engineer.DoesNotExist:
+                return Response(
+                    {"detail": f"Engineer with id {eid} not found."},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
+            # Validate: engineer must be active
+            if engineer.status != "active":
+                return Response(
+                    {"detail": f"Engineer '{engineer.name}' is inactive and cannot be assigned."},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
+            # Validate: engineer must be from same region as ticket
+            if ticket.region and engineer.region != ticket.region:
+                return Response(
+                    {"detail": f"Engineer '{engineer.name}' belongs to {engineer.get_region_display()}, "
+                               f"but this ticket is in {ticket.get_region_display()}. "
+                               f"Cross-region assignment is not allowed."},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
+            ticket.assigned_engineer = engineer
+            ticket.assigned_at = timezone.now()
 
         try:
             ticket = transition_ticket(
@@ -356,7 +378,7 @@ class TicketTransitionView(APIView):
                 actor=actor,
                 actor_role=actor_role,
                 comment=comment,
-                metadata={"assignee_id": assignee_id} if assignee_id else {},
+                metadata={"engineer_id": engineer_id or assignee_id} if (engineer_id or assignee_id) else {},
             )
         except TransitionError as e:
             return Response(

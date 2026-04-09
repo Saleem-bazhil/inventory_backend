@@ -6,8 +6,9 @@ from rest_framework import permissions, status
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from .models import BufferStock, POItem, PurchaseOrder, StockItem, StockMovement
+from .models import BufferPart, BufferStock, POItem, PurchaseOrder, StockItem, StockMovement
 from .serializers import (
+    BufferPartSerializer,
     BufferStockSerializer,
     POItemSerializer,
     PurchaseOrderSerializer,
@@ -536,3 +537,59 @@ class BufferReleaseView(APIView):
         obj.save()
 
         return Response({'detail': 'Buffer released successfully.'}, status=status.HTTP_200_OK)
+
+
+# ---------------------------------------------------------------------------
+# Buffer Parts (simple standalone buffer)
+# ---------------------------------------------------------------------------
+
+class BufferPartListCreateView(APIView):
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get(self, request):
+        qs = BufferPart.objects.all()
+        search = request.query_params.get("search", "").strip()
+        if search:
+            qs = qs.filter(
+                Q(part_number__icontains=search)
+                | Q(part_name__icontains=search)
+                | Q(general_name__icontains=search)
+            )
+        page_qs, meta = paginate_queryset(qs, request)
+        serializer = BufferPartSerializer(page_qs, many=True)
+        return Response({"items": serializer.data, **meta})
+
+    def post(self, request):
+        serializer = BufferPartSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        serializer.save(created_by=request.user)
+        return Response(serializer.data, status=status.HTTP_201_CREATED)
+
+
+class BufferPartDetailView(APIView):
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get(self, request, pk):
+        try:
+            obj = BufferPart.objects.get(pk=pk)
+        except BufferPart.DoesNotExist:
+            return Response({"detail": "Not found."}, status=status.HTTP_404_NOT_FOUND)
+        return Response(BufferPartSerializer(obj).data)
+
+    def put(self, request, pk):
+        try:
+            obj = BufferPart.objects.get(pk=pk)
+        except BufferPart.DoesNotExist:
+            return Response({"detail": "Not found."}, status=status.HTTP_404_NOT_FOUND)
+        serializer = BufferPartSerializer(obj, data=request.data, partial=True)
+        serializer.is_valid(raise_exception=True)
+        serializer.save()
+        return Response(BufferPartSerializer(obj).data)
+
+    def delete(self, request, pk):
+        try:
+            obj = BufferPart.objects.get(pk=pk)
+        except BufferPart.DoesNotExist:
+            return Response({"detail": "Not found."}, status=status.HTTP_404_NOT_FOUND)
+        obj.delete()
+        return Response(status=status.HTTP_204_NO_CONTENT)

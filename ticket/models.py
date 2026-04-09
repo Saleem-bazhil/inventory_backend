@@ -2,6 +2,8 @@ from django.contrib.auth.models import User
 from django.db import models
 from django.utils import timezone
 
+from authenticate.models import Engineer
+
 
 class Ticket(models.Model):
     """Main service record — replaces MaterialTrack."""
@@ -96,6 +98,13 @@ class Ticket(models.Model):
         related_name="assigned_tickets", verbose_name="Current Assignee",
     )
     requires_parts = models.BooleanField(default=False, verbose_name="Requires Parts")
+
+    # --- Assigned engineer (separate entity) ---
+    assigned_engineer = models.ForeignKey(
+        Engineer, on_delete=models.SET_NULL, null=True, blank=True,
+        related_name="assigned_tickets", verbose_name="Assigned Engineer",
+    )
+    assigned_at = models.DateTimeField(null=True, blank=True, verbose_name="Assigned At")
 
     # --- Part details ---
     part_number = models.CharField(max_length=100, verbose_name="Product/Part No.", blank=True, null=True)

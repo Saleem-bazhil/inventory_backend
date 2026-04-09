@@ -164,3 +164,25 @@ class BufferStock(models.Model):
 
     def __str__(self):
         return f"Buffer: {self.stock_item.part_number} x{self.quantity}"
+
+
+class BufferPart(models.Model):
+    """Simple buffer entry — standalone parts not tied to stock inventory."""
+
+    part_number = models.CharField(max_length=100, verbose_name="Part Number")
+    part_name = models.CharField(max_length=255, verbose_name="Part Name")
+    quantity = models.IntegerField(verbose_name="Quantity")
+    general_name = models.CharField(max_length=255, blank=True, default="", verbose_name="General Name")
+    created_by = models.ForeignKey(
+        User, on_delete=models.SET_NULL, null=True, blank=True,
+        related_name="buffer_parts",
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["-created_at"]
+        verbose_name = "Buffer Part"
+        verbose_name_plural = "Buffer Parts"
+
+    def __str__(self):
+        return f"{self.part_number} — {self.part_name} x{self.quantity}"

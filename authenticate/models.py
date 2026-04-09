@@ -59,9 +59,53 @@ class UserProfile(models.Model):
 
     @property
     def effective_role(self):
-        """Map legacy roles to new workflow roles."""
+        """Map legacy roles to new workflow roles.
+
+        sub_admin = regional admin with full control within their region,
+        NOT a field engineer. They manage engineers, assign tickets, etc.
+        """
         mapping = {
             self.SUPER_ADMIN: self.ADMIN,
-            self.SUB_ADMIN: self.ENGINEER,
+            self.SUB_ADMIN: self.ADMIN,
         }
         return mapping.get(self.role, self.role)
+
+
+class Engineer(models.Model):
+    """
+    Separate engineer entity — field technicians managed by sub-admins.
+    Engineers are assigned to service tickets but do not log into the system.
+    """
+
+    STATUS_CHOICES = (
+        ("active", "Active"),
+        ("inactive", "Inactive"),
+    )
+
+    REGION_CHOICES = UserProfile.REGION_CHOICES
+
+    name = models.CharField(max_length=255, verbose_name="Full Name")
+    email = models.EmailField(blank=True, default="", verbose_name="Email")
+    phone = models.CharField(max_length=20, blank=True, default="", verbose_name="Phone")
+    region = models.CharField(
+        max_length=20, choices=REGION_CHOICES,
+        verbose_name="Region",
+    )
+    status = models.CharField(
+        max_length=10, choices=STATUS_CHOICES, default="active",
+        verbose_name="Status",
+    )
+    created_by = models.ForeignKey(
+        User, on_delete=models.SET_NULL, null=True, blank=True,
+        related_name="created_engineers", verbose_name="Created By",
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        verbose_name = "Engineer"
+        verbose_name_plural = "Engineers"
+        ordering = ["name"]
+
+    def __str__(self):
+        return f"{self.name} ({self.get_region_display()})"

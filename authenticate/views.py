@@ -5,9 +5,11 @@ from rest_framework.views import APIView
 from rest_framework_simplejwt.tokens import RefreshToken
 from rest_framework_simplejwt.views import TokenRefreshView
 
-from .models import UserProfile
+from .models import Engineer, UserProfile
 from .serializers import (
     AuthUserSerializer,
+    EngineerCreateUpdateSerializer,
+    EngineerSerializer,
     LoginSerializer,
     RegisterSerializer,
     SubAdminSerializer,
@@ -70,22 +72,140 @@ class RefreshView(TokenRefreshView):
 # ── Engineers list (for assignment dropdowns) ──────────────────────
 
 class EngineersListView(APIView):
-    """Return all active users who can be assigned to tickets."""
+    """
+    Return active engineers filtered by the logged-in user's region.
+    Super-admin / admin see all engineers. Sub-admin see their region only.
+    Accepts optional ?region= query param for admin filtering.
+    """
     permission_classes = [permissions.IsAuthenticated]
 
     def get(self, request):
-        users = User.objects.filter(is_active=True).exclude(
-            pk=request.user.pk,  # exclude the requester
-        ).select_related("userprofile")
+        profile = getattr(request.user, "userprofile", None)
+        is_admin = profile and profile.is_admin if profile else False
 
-        data = []
-        for u in users:
-            profile = getattr(u, "userprofile", None)
-            role = profile.role if profile else "engineer"
-            name = u.get_full_name() or u.username
-            data.append({"id": u.id, "full_name": name, "role": role})
+        qs = Engineer.objects.filter(status="active")
 
-        return Response(data)
+        if is_admin:
+            # Admin can optionally filter by region
+            region_filter = request.query_params.get("region", "").strip()
+            if region_filter:
+                qs = qs.filter(region=region_filter)
+        elif profile and profile.region:
+            # Non-admin: only their region
+            qs = qs.filter(region=profile.region)
+        else:
+            # No profile/region: return empty
+            qs = qs.none()
+
+        serializer = EngineerSerializer(qs, many=True)
+        return Response(serializer.data)
+
+
+# ── Engineer CRUD (sub-admin manages engineers in their region) ───
+
+
+class EngineerListCreateView(APIView):
+    """
+    GET: list engineers (region-scoped).
+    POST: create a new engineer (region auto-assigned from user).
+    """
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get(self, request):
+        profile = getattr(request.user, "userprofile", None)
+        is_admin = profile and profile.is_admin if profile else False
+
+        qs = Engineer.objects.all()
+
+        if is_admin:
+            region_filter = request.query_params.get("region", "").strip()
+            if region_filter:
+                qs = qs.filter(region=region_filter)
+        elif profile and profile.region:
+            qs = qs.filter(region=profile.region)
+        else:
+            qs = qs.none()
+
+        serializer = EngineerSerializer(qs, many=True)
+        return Response(serializer.data)
+
+    def post(self, request):
+        profile = getattr(request.user, "userprofile", None)
+        is_admin = profile and profile.is_admin if profile else False
+
+        serializer = EngineerCreateUpdateSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+
+        # Non-admin: force region to user's region
+        region = serializer.validated_data.get("region")
+        if not is_admin:
+            if not profile or not profile.region:
+                return Response(
+                    {"detail": "Your account has no region assigned."},
+                    status=status.HTTP_403_FORBIDDEN,
+                )
+            region = profile.region
+            serializer.validated_data["region"] = region
+
+        engineer = serializer.save(created_by=request.user)
+        return Response(
+            EngineerSerializer(engineer).data,
+            status=status.HTTP_201_CREATED,
+        )
+
+
+class EngineerDetailView(APIView):
+    """GET / PUT / DELETE a single engineer."""
+    permission_classes = [permissions.IsAuthenticated]
+
+    def _get_engineer(self, request, pk):
+        try:
+            engineer = Engineer.objects.get(pk=pk)
+        except Engineer.DoesNotExist:
+            return None
+
+        profile = getattr(request.user, "userprofile", None)
+        is_admin = profile and profile.is_admin if profile else False
+
+        if is_admin:
+            return engineer
+        if profile and profile.region and engineer.region == profile.region:
+            return engineer
+        return None
+
+    def get(self, request, pk):
+        engineer = self._get_engineer(request, pk)
+        if not engineer:
+            return Response({"detail": "Engineer not found."}, status=status.HTTP_404_NOT_FOUND)
+        return Response(EngineerSerializer(engineer).data)
+
+    def put(self, request, pk):
+        engineer = self._get_engineer(request, pk)
+        if not engineer:
+            return Response({"detail": "Engineer not found."}, status=status.HTTP_404_NOT_FOUND)
+
+        profile = getattr(request.user, "userprofile", None)
+        is_admin = profile and profile.is_admin if profile else False
+
+        serializer = EngineerCreateUpdateSerializer(engineer, data=request.data, partial=True)
+        serializer.is_valid(raise_exception=True)
+
+        # Non-admin cannot change region
+        if not is_admin and "region" in serializer.validated_data:
+            serializer.validated_data["region"] = engineer.region
+
+        serializer.save()
+        return Response(EngineerSerializer(engineer).data)
+
+    def delete(self, request, pk):
+        engineer = self._get_engineer(request, pk)
+        if not engineer:
+            return Response({"detail": "Engineer not found."}, status=status.HTTP_404_NOT_FOUND)
+
+        # Soft-delete: set inactive
+        engineer.status = "inactive"
+        engineer.save(update_fields=["status"])
+        return Response(status=status.HTTP_204_NO_CONTENT)
 
 
 # ── Super Admin: manage sub-admins ──────────────────────────────────

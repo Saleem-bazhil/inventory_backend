@@ -3,6 +3,7 @@ from django.db.models import Sum
 from django.utils import timezone
 from rest_framework import serializers
 
+from authenticate.models import Engineer
 from .models import DelayRecord, Ticket, TicketTimeline
 
 
@@ -20,6 +21,20 @@ def _user_summary(user):
         role = profile.role
     full_name = user.get_full_name() or user.username
     return {"id": user.pk, "full_name": full_name, "role": role}
+
+
+def _engineer_summary(engineer):
+    """Return a compact dict for an Engineer."""
+    if engineer is None:
+        return None
+    return {
+        "id": engineer.pk,
+        "name": engineer.name,
+        "phone": engineer.phone,
+        "region": engineer.region,
+        "region_display": engineer.get_region_display(),
+        "status": engineer.status,
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -78,6 +93,7 @@ class TicketListSerializer(serializers.ModelSerializer):
     # Nested user info
     current_assignee = serializers.SerializerMethodField()
     created_by = serializers.SerializerMethodField()
+    assigned_engineer = serializers.SerializerMethodField()
 
     class Meta:
         model = Ticket
@@ -101,6 +117,8 @@ class TicketListSerializer(serializers.ModelSerializer):
             "region_display",
             "requires_parts",
             "current_assignee",
+            "assigned_engineer",
+            "assigned_at",
             "created_by",
             "arrival_date",
             "target_completion",
@@ -169,6 +187,9 @@ class TicketListSerializer(serializers.ModelSerializer):
     def get_created_by(self, obj):
         return _user_summary(obj.created_by)
 
+    def get_assigned_engineer(self, obj):
+        return _engineer_summary(obj.assigned_engineer)
+
 
 # ---------------------------------------------------------------------------
 # Ticket — Detail (full, with timeline)
@@ -179,6 +200,7 @@ class TicketDetailSerializer(serializers.ModelSerializer):
     delay_records = serializers.SerializerMethodField()
     current_assignee = serializers.SerializerMethodField()
     created_by = serializers.SerializerMethodField()
+    assigned_engineer = serializers.SerializerMethodField()
 
     # Display helpers
     current_status_display = serializers.CharField(
@@ -229,6 +251,8 @@ class TicketDetailSerializer(serializers.ModelSerializer):
             "current_status",
             "current_status_display",
             "current_assignee",
+            "assigned_engineer",
+            "assigned_at",
             "requires_parts",
             # Parts
             "part_number",
@@ -316,6 +340,9 @@ class TicketDetailSerializer(serializers.ModelSerializer):
 
     def get_created_by(self, obj):
         return _user_summary(obj.created_by)
+
+    def get_assigned_engineer(self, obj):
+        return _engineer_summary(obj.assigned_engineer)
 
     def get_timeline(self, obj):
         entries = obj.timeline_entries.all().order_by("entered_at")
@@ -464,17 +491,12 @@ class TransitionSerializer(serializers.Serializer):
     to_status = serializers.CharField(max_length=30)
     comment = serializers.CharField(required=False, allow_blank=True, default="")
     assignee_id = serializers.IntegerField(required=False, allow_null=True, default=None)
+    engineer_id = serializers.IntegerField(required=False, allow_null=True, default=None)
 
     def validate_to_status(self, value):
         valid_statuses = [s[0] for s in Ticket.TICKET_STATUS_CHOICES]
         if value not in valid_statuses:
             raise serializers.ValidationError(f"'{value}' is not a valid status.")
-        return value
-
-    def validate_assignee_id(self, value):
-        if value is not None:
-            if not User.objects.filter(pk=value).exists():
-                raise serializers.ValidationError(f"User with id {value} does not exist.")
         return value
 
 

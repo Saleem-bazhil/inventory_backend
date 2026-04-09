@@ -2,6 +2,8 @@ from django.urls import path
 
 from .views import (
     BufferListCreateView,
+    BufferPartDetailView,
+    BufferPartListCreateView,
     BufferReleaseView,
     BufferUpdateView,
     LowStockView,
@@ -35,8 +37,12 @@ urlpatterns = [
     path('stock/<int:pk>/reserve/', StockReserveView.as_view(), name='stock-reserve'),
     path('stock/<int:pk>/release/', StockReleaseView.as_view(), name='stock-release'),
 
-    # Buffer
+    # Buffer (stock reservation)
     path('buffer/', BufferListCreateView.as_view(), name='buffer-list'),
     path('buffer/<int:pk>/', BufferUpdateView.as_view(), name='buffer-update'),
     path('buffer/<int:pk>/release/', BufferReleaseView.as_view(), name='buffer-release'),
+
+    # Buffer Parts (simple standalone)
+    path('buffer-parts/', BufferPartListCreateView.as_view(), name='buffer-parts-list'),
+    path('buffer-parts/<int:pk>/', BufferPartDetailView.as_view(), name='buffer-parts-detail'),
 ]
