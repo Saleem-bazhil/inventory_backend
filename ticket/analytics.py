@@ -14,11 +14,20 @@ from .models import DelayRecord, Ticket, TicketTimeline
 
 
 def _get_user_role(user):
+    """Map user profile role to workflow role. sub_admin = regional admin."""
     profile = getattr(user, "userprofile", None)
     if not profile:
-        return "engineer"
-    mapping = {"super_admin": "admin", "sub_admin": "engineer"}
-    return mapping.get(profile.role, profile.role)
+        return "admin"
+    role_map = {
+        "super_admin": "admin",
+        "sub_admin": "admin",
+        "admin": "admin",
+        "manager": "manager",
+        "engineer": "engineer",
+        "receptionist": "receptionist",
+        "cc_team": "cc_team",
+    }
+    return role_map.get(profile.role, "admin")
 
 
 # ---------------------------------------------------------------------------
@@ -103,9 +112,9 @@ class DashboardOverviewView(APIView):
         cx_pending_count = by_status.get("cx_pending", 0)
         completed_count = by_status.get("closed", 0)
 
-        # Warranty breakdown (overall)
-        warranty_count = qs.filter(service_type="warranty").exclude(current_status="closed").count()
-        out_of_warranty_count = qs.exclude(service_type="warranty").exclude(current_status="closed").count()
+        # Warranty breakdown (overall — includes all tickets, not just open)
+        warranty_count = qs.filter(service_type="warranty").count()
+        out_of_warranty_count = qs.exclude(service_type="warranty").count()
 
         # Today's breakdown
         today_qs = qs.filter(created_at__gte=today_start)
