@@ -63,10 +63,12 @@ class UserProfile(models.Model):
 
         sub_admin = regional admin with full control within their region,
         NOT a field engineer. They manage engineers, assign tickets, etc.
+        super_admin = top-level admin mapped to 'admin' workflow role.
+        sub_admin keeps its own identity so it can be excluded from
+        specific actions (e.g. part approval).
         """
         mapping = {
             self.SUPER_ADMIN: self.ADMIN,
-            self.SUB_ADMIN: self.ADMIN,
         }
         return mapping.get(self.role, self.role)
 

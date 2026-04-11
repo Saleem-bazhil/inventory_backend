@@ -20,7 +20,7 @@ def _get_user_role(user):
         return "admin"
     role_map = {
         "super_admin": "admin",
-        "sub_admin": "admin",
+        "sub_admin": "sub_admin",
         "admin": "admin",
         "manager": "manager",
         "engineer": "engineer",

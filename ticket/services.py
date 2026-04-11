@@ -17,35 +17,36 @@ from .models import DelayRecord, SLAConfig, Ticket, TicketTimeline
 # ---------------------------------------------------------------------------
 
 WORKFLOW_TRANSITIONS = {
-    "cso_created": [{"to": "assigned", "roles": ["manager", "admin"]}],
-    "assigned": [{"to": "diagnosis", "roles": ["engineer", "admin"]}],
+    "cso_created": [{"to": "assigned", "roles": ["manager", "sub_admin", "admin"]}],
+    "assigned": [{"to": "diagnosis", "roles": ["engineer", "sub_admin", "admin"]}],
     "diagnosis": [
-        {"to": "part_requested", "roles": ["engineer", "admin"]},
-        {"to": "in_progress", "roles": ["engineer", "admin"]},
+        {"to": "part_requested", "roles": ["engineer", "sub_admin", "admin"]},
+        {"to": "in_progress", "roles": ["engineer", "sub_admin", "admin"]},
     ],
     "part_requested": [
+        # Only manager / admin can approve parts — sub_admin is explicitly excluded
         {"to": "part_approved", "roles": ["manager", "admin"]},
         {"to": "diagnosis", "roles": ["manager", "admin"]},
     ],
-    "part_approved": [{"to": "quotation_sent", "roles": ["cc_team", "admin"]}],
-    "quotation_sent": [{"to": "cx_pending", "roles": ["cc_team", "admin"]}],
+    "part_approved": [{"to": "quotation_sent", "roles": ["cc_team", "sub_admin", "admin"]}],
+    "quotation_sent": [{"to": "cx_pending", "roles": ["cc_team", "sub_admin", "admin"]}],
     "cx_pending": [
-        {"to": "cx_approved", "roles": ["cc_team", "admin"]},
-        {"to": "cx_rejected", "roles": ["cc_team", "admin"]},
+        {"to": "cx_approved", "roles": ["cc_team", "sub_admin", "admin"]},
+        {"to": "cx_rejected", "roles": ["cc_team", "sub_admin", "admin"]},
     ],
-    "cx_approved": [{"to": "part_ordered", "roles": ["manager", "admin"]}],
+    "cx_approved": [{"to": "part_ordered", "roles": ["manager", "sub_admin", "admin"]}],
     "cx_rejected": [
-        {"to": "closed", "roles": ["manager", "admin"]},
-        {"to": "quotation_sent", "roles": ["cc_team", "manager", "admin"]},
+        {"to": "closed", "roles": ["manager", "sub_admin", "admin"]},
+        {"to": "quotation_sent", "roles": ["cc_team", "manager", "sub_admin", "admin"]},
     ],
-    "part_ordered": [{"to": "part_received", "roles": ["manager", "admin"]}],
-    "part_received": [{"to": "in_progress", "roles": ["engineer", "admin"]}],
-    "in_progress": [{"to": "ready_for_delivery", "roles": ["engineer", "admin"]}],
-    "ready_for_delivery": [{"to": "closed", "roles": ["receptionist", "manager", "admin"]}],
-    "closed": [{"to": "under_observation", "roles": ["manager", "admin"]}],
+    "part_ordered": [{"to": "part_received", "roles": ["manager", "sub_admin", "admin"]}],
+    "part_received": [{"to": "in_progress", "roles": ["engineer", "sub_admin", "admin"]}],
+    "in_progress": [{"to": "ready_for_delivery", "roles": ["engineer", "sub_admin", "admin"]}],
+    "ready_for_delivery": [{"to": "closed", "roles": ["receptionist", "manager", "sub_admin", "admin"]}],
+    "closed": [{"to": "under_observation", "roles": ["manager", "sub_admin", "admin"]}],
     "under_observation": [
-        {"to": "closed", "roles": ["manager", "admin"]},
-        {"to": "in_progress", "roles": ["manager", "admin"]},
+        {"to": "closed", "roles": ["manager", "sub_admin", "admin"]},
+        {"to": "in_progress", "roles": ["manager", "sub_admin", "admin"]},
     ],
 }
 

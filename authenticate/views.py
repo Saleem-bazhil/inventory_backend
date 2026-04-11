@@ -11,6 +11,7 @@ from .serializers import (
     EngineerCreateUpdateSerializer,
     EngineerSerializer,
     LoginSerializer,
+    ManagerSerializer,
     RegisterSerializer,
     SubAdminSerializer,
     UpdateProfileSerializer,
@@ -256,6 +257,102 @@ class SubAdminListCreateView(APIView):
             },
             status=status.HTTP_201_CREATED,
         )
+
+
+# ── Super Admin: manage managers ──────────────────────────────────
+
+
+class ManagerListCreateView(APIView):
+    """GET: list all managers. POST: create a new manager."""
+    permission_classes = [permissions.IsAuthenticated, IsSuperAdmin]
+
+    def get(self, request):
+        users = User.objects.filter(userprofile__role=UserProfile.MANAGER).select_related("userprofile")
+        data = [
+            {
+                "id": u.id,
+                "username": u.username,
+                "email": u.email,
+                "first_name": u.first_name,
+                "last_name": u.last_name,
+                "region": u.userprofile.region,
+                "region_display": u.userprofile.get_region_display() if u.userprofile.region else "",
+                "is_active": u.is_active,
+            }
+            for u in users
+        ]
+        return Response(data)
+
+    def post(self, request):
+        serializer = ManagerSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        user = serializer.save()
+        profile = user.userprofile
+        return Response(
+            {
+                "id": user.id,
+                "username": user.username,
+                "email": user.email,
+                "first_name": user.first_name,
+                "last_name": user.last_name,
+                "region": profile.region,
+                "region_display": profile.get_region_display() if profile.region else "",
+                "is_active": user.is_active,
+            },
+            status=status.HTTP_201_CREATED,
+        )
+
+
+class ManagerDetailView(APIView):
+    """PUT: update manager. DELETE: deactivate manager."""
+    permission_classes = [permissions.IsAuthenticated, IsSuperAdmin]
+
+    def _get_user(self, pk):
+        try:
+            return User.objects.select_related("userprofile").get(pk=pk, userprofile__role=UserProfile.MANAGER)
+        except User.DoesNotExist:
+            return None
+
+    def put(self, request, pk):
+        user = self._get_user(pk)
+        if not user:
+            return Response({"detail": "Manager not found."}, status=status.HTTP_404_NOT_FOUND)
+        serializer = ManagerSerializer(data=request.data, partial=True)
+        serializer.is_valid(raise_exception=True)
+        d = serializer.validated_data
+        if "username" in d:
+            user.username = d["username"]
+        if "email" in d:
+            user.email = d["email"]
+        if "first_name" in d:
+            user.first_name = d["first_name"]
+        if "last_name" in d:
+            user.last_name = d["last_name"]
+        if "password" in d:
+            user.set_password(d["password"])
+        user.save()
+        if "region" in d:
+            user.userprofile.region = d["region"] or None
+            user.userprofile.save(update_fields=["region"])
+        profile = user.userprofile
+        return Response({
+            "id": user.id,
+            "username": user.username,
+            "email": user.email,
+            "first_name": user.first_name,
+            "last_name": user.last_name,
+            "region": profile.region,
+            "region_display": profile.get_region_display() if profile.region else "",
+            "is_active": user.is_active,
+        })
+
+    def delete(self, request, pk):
+        user = self._get_user(pk)
+        if not user:
+            return Response({"detail": "Manager not found."}, status=status.HTTP_404_NOT_FOUND)
+        user.is_active = False
+        user.save(update_fields=["is_active"])
+        return Response(status=status.HTTP_204_NO_CONTENT)
 
 
 class SubAdminDetailView(APIView):

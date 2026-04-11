@@ -5,8 +5,25 @@ from rest_framework import permissions, status
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
+from authenticate.models import UserProfile
 from .models import PartRequest
 from .serializers import PartRequestSerializer
+
+
+# Roles allowed to approve / reject part requests
+_PART_APPROVER_ROLES = {
+    UserProfile.MANAGER,
+    UserProfile.ADMIN,
+    UserProfile.SUPER_ADMIN,
+}
+
+
+def _is_part_approver(user):
+    """Return True if the user may approve or reject part requests."""
+    profile = getattr(user, "userprofile", None)
+    if not profile:
+        return False
+    return profile.role in _PART_APPROVER_ROLES
 
 
 def paginate_queryset(queryset, request):
@@ -99,6 +116,12 @@ class PartRequestApproveView(APIView):
     permission_classes = [permissions.IsAuthenticated]
 
     def post(self, request, pk):
+        if not _is_part_approver(request.user):
+            return Response(
+                {'detail': 'Only manager or super_admin can approve parts.'},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
         try:
             obj = PartRequest.objects.get(pk=pk)
         except PartRequest.DoesNotExist:
@@ -123,6 +146,12 @@ class PartRequestRejectView(APIView):
     permission_classes = [permissions.IsAuthenticated]
 
     def post(self, request, pk):
+        if not _is_part_approver(request.user):
+            return Response(
+                {'detail': 'Only manager or super_admin can reject parts.'},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
         try:
             obj = PartRequest.objects.get(pk=pk)
         except PartRequest.DoesNotExist:
