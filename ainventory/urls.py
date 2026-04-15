@@ -12,6 +12,7 @@ urlpatterns = [
     path('api/', include('parts.urls')),
     path('api/', include('quotation.urls')),
     path('api/', include('procurement.urls')),
+    path('api/', include('buffer_stock.urls')),
     path('api/', include('invoice.urls')),
     path('api/auth/', include('authenticate.urls')),
     path('api/users/engineers/', EngineersListView.as_view(), name='engineers-list'),
