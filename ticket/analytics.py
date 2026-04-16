@@ -106,7 +106,7 @@ class DashboardOverviewView(APIView):
         unassigned_count = qs.filter(assigned_engineer__isnull=True).exclude(current_status="closed").count()
         in_progress_count = by_status.get("in_progress", 0) + by_status.get("diagnosis", 0) + by_status.get("assigned", 0)
         part_pending_count = by_status.get("part_requested", 0)
-        part_order_pending_count = by_status.get("cx_approved", 0) + by_status.get("part_ordered", 0)
+        part_order_pending_count = by_status.get("part_ordered", 0)
         part_quote_pending_count = by_status.get("part_approved", 0) + by_status.get("quotation_sent", 0)
         ready_to_dispatch_count = by_status.get("ready_for_delivery", 0)
         cx_pending_count = by_status.get("cx_pending", 0)
@@ -128,7 +128,7 @@ class DashboardOverviewView(APIView):
             today_by_status[row["current_status"]] = row["count"]
 
         today_part_pending = today_by_status.get("part_requested", 0)
-        today_part_order_pending = today_by_status.get("cx_approved", 0) + today_by_status.get("part_ordered", 0)
+        today_part_order_pending = today_by_status.get("part_ordered", 0)
         today_part_quote_pending = today_by_status.get("part_approved", 0) + today_by_status.get("quotation_sent", 0)
         today_cx_pending = today_by_status.get("cx_pending", 0)
 
@@ -375,7 +375,7 @@ class ManagerApprovalView(APIView):
             user = profile.user
             approvals = TicketTimeline.objects.filter(
                 actor=user,
-                to_status__in=["assigned", "part_approved", "cx_approved", "part_ordered"],
+                to_status__in=["assigned", "part_approved", "part_ordered"],
                 exited_at__isnull=False,
             )
             total_approvals = approvals.count()

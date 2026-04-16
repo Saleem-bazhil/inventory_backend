@@ -31,22 +31,20 @@ WORKFLOW_TRANSITIONS = {
     "part_approved": [{"to": "quotation_sent", "roles": ["cc_team", "sub_admin", "admin"]}],
     "quotation_sent": [{"to": "cx_pending", "roles": ["cc_team", "sub_admin", "admin"]}],
     "cx_pending": [
-        {"to": "cx_approved", "roles": ["cc_team", "sub_admin", "admin"]},
-        {"to": "cx_rejected", "roles": ["cc_team", "sub_admin", "admin"]},
-    ],
-    "cx_approved": [{"to": "part_ordered", "roles": ["manager", "sub_admin", "admin"]}],
-    "cx_rejected": [
-        {"to": "closed", "roles": ["manager", "sub_admin", "admin"]},
-        {"to": "quotation_sent", "roles": ["cc_team", "manager", "sub_admin", "admin"]},
+        {"to": "part_ordered", "roles": ["cc_team", "sub_admin", "admin"]},
+        {"to": "closed", "roles": ["cc_team", "sub_admin", "admin"]},
+        {"to": "quotation_sent", "roles": ["cc_team", "sub_admin", "admin"]},
     ],
     "part_ordered": [{"to": "part_received", "roles": ["manager", "sub_admin", "admin"]}],
     "part_received": [{"to": "in_progress", "roles": ["engineer", "sub_admin", "admin"]}],
-    "in_progress": [{"to": "ready_for_delivery", "roles": ["engineer", "sub_admin", "admin"]}],
+    "in_progress": [
+        {"to": "part_requested", "roles": ["engineer", "sub_admin", "admin"]},
+        {"to": "ready_for_delivery", "roles": ["engineer", "sub_admin", "admin"]},
+    ],
     "ready_for_delivery": [{"to": "closed", "roles": ["receptionist", "manager", "sub_admin", "admin"]}],
     "closed": [{"to": "under_observation", "roles": ["manager", "sub_admin", "admin"]}],
     "under_observation": [
         {"to": "closed", "roles": ["manager", "sub_admin", "admin"]},
-        {"to": "in_progress", "roles": ["manager", "sub_admin", "admin"]},
     ],
 }
 
@@ -101,8 +99,7 @@ def get_available_transitions(ticket, actor_role):
     available = []
     for t in transitions:
         if actor_role in t["roles"]:
-            # Prevent closed → under_observation loop:
-            # If ticket was already under observation, don't allow it again.
+            # Block closed → under_observation if ticket already went through it (final close)
             if (
                 ticket.current_status == "closed"
                 and t["to"] == "under_observation"
@@ -157,12 +154,11 @@ def transition_ticket(ticket, to_status, actor, actor_role, comment=None, metada
             f"for role '{actor_role}'."
         )
 
-    # Auto-set requires_parts based on path chosen from diagnosis
-    if from_status == "diagnosis":
-        if to_status == "part_requested":
-            ticket.requires_parts = True
-        elif to_status == "in_progress":
-            ticket.requires_parts = False
+    # Auto-set requires_parts based on path chosen
+    if to_status == "part_requested":
+        ticket.requires_parts = True
+    elif from_status == "diagnosis" and to_status == "in_progress":
+        ticket.requires_parts = False
 
     now = timezone.now()
 
@@ -252,8 +248,8 @@ def _apply_side_effects(ticket, from_status, to_status, actor, comment, metadata
     from quotation.models import Quotation, QuotationItem
     from invoice.models import Invoice
 
-    # diagnosis → part_requested: auto-create PartRequest from ticket's part fields
-    if to_status == "part_requested" and from_status == "diagnosis":
+    # → part_requested: auto-create PartRequest from ticket's part fields
+    if to_status == "part_requested" and from_status in ("diagnosis", "in_progress"):
         # Only create if one doesn't already exist for this ticket in pending state
         if not PartRequest.objects.filter(ticket=ticket, status="pending").exists():
             PartRequest.objects.create(
@@ -304,8 +300,8 @@ def _apply_side_effects(ticket, from_status, to_status, actor, comment, metadata
                     total=(part.estimated_cost or 0) * part.quantity,
                 )
 
-    # cx_approved → part_ordered: auto-create PurchaseOrder
-    elif to_status == "part_ordered" and from_status == "cx_approved":
+    # cx_pending → part_ordered: auto-create PurchaseOrder
+    elif to_status == "part_ordered" and from_status == "cx_pending":
         from procurement.models import PurchaseOrder, POItem
         if not PurchaseOrder.objects.filter(
             items__part_request__ticket=ticket,

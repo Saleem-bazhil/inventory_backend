@@ -78,6 +78,7 @@ class TicketListSerializer(serializers.ModelSerializer):
     sla_remaining_mins = serializers.SerializerMethodField()
     current_stage_elapsed_mins = serializers.SerializerMethodField()
     total_delay_mins = serializers.SerializerMethodField()
+    was_under_observation = serializers.SerializerMethodField()
 
     # Display helpers
     current_status_display = serializers.CharField(
@@ -130,6 +131,7 @@ class TicketListSerializer(serializers.ModelSerializer):
             "sla_remaining_mins",
             "current_stage_elapsed_mins",
             "total_delay_mins",
+            "was_under_observation",
         ]
 
     # -- helpers for the current open timeline entry --
@@ -190,6 +192,9 @@ class TicketListSerializer(serializers.ModelSerializer):
     def get_assigned_engineer(self, obj):
         return _engineer_summary(obj.assigned_engineer)
 
+    def get_was_under_observation(self, obj):
+        return TicketTimeline.objects.filter(ticket=obj, to_status="under_observation").exists()
+
 
 # ---------------------------------------------------------------------------
 # Ticket — Detail (full, with timeline)
@@ -201,6 +206,7 @@ class TicketDetailSerializer(serializers.ModelSerializer):
     current_assignee = serializers.SerializerMethodField()
     created_by = serializers.SerializerMethodField()
     assigned_engineer = serializers.SerializerMethodField()
+    was_under_observation = serializers.SerializerMethodField()
 
     # Display helpers
     current_status_display = serializers.CharField(
@@ -287,6 +293,7 @@ class TicketDetailSerializer(serializers.ModelSerializer):
             "sla_remaining_mins",
             "current_stage_elapsed_mins",
             "total_delay_mins",
+            "was_under_observation",
             # Nested
             "timeline",
             "delay_records",
@@ -351,6 +358,9 @@ class TicketDetailSerializer(serializers.ModelSerializer):
     def get_delay_records(self, obj):
         records = obj.delay_records.all().order_by("-id")
         return DelayRecordSerializer(records, many=True).data
+
+    def get_was_under_observation(self, obj):
+        return TicketTimeline.objects.filter(ticket=obj, to_status="under_observation").exists()
 
 
 class DelayRecordSerializer(serializers.ModelSerializer):

@@ -415,7 +415,7 @@ class AvailableTransitionsView(APIView):
             result.append({
                 "to_status": t["to"],
                 "label": status_labels.get(t["to"], t["to"]),
-                "requires_comment": t["to"] in ("cx_rejected", "closed"),
+                "requires_comment": t["to"] in ("closed", "quotation_sent"),
             })
 
         serializer = AvailableTransitionSerializer(result, many=True)

@@ -11,7 +11,6 @@ DEFAULT_SLAS = [
     {"status": "part_approved",      "sla_minutes": 120,   "responsible_role": "cc_team",      "escalation_after_mins": 180,  "escalation_to_role": "manager"},
     {"status": "quotation_sent",     "sla_minutes": 60,    "responsible_role": "cc_team",      "escalation_after_mins": 120,  "escalation_to_role": "manager"},
     {"status": "cx_pending",         "sla_minutes": 1440,  "responsible_role": "cc_team",      "escalation_after_mins": 2880, "escalation_to_role": "manager"},
-    {"status": "cx_approved",        "sla_minutes": 60,    "responsible_role": "manager",      "escalation_after_mins": 120,  "escalation_to_role": "admin"},
     {"status": "part_ordered",       "sla_minutes": 2880,  "responsible_role": "manager",      "escalation_after_mins": 4320, "escalation_to_role": "admin"},
     {"status": "part_received",      "sla_minutes": 120,   "responsible_role": "manager",      "escalation_after_mins": 240,  "escalation_to_role": "admin"},
     {"status": "in_progress",        "sla_minutes": 480,   "responsible_role": "engineer",     "escalation_after_mins": 720,  "escalation_to_role": "manager"},
