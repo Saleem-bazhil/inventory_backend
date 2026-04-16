@@ -147,6 +147,11 @@ class EngineerListCreateView(APIView):
                 )
             region = profile.region
             serializer.validated_data["region"] = region
+        elif not region:
+            return Response(
+                {"region": ["This field is required."]},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
 
         engineer = serializer.save(created_by=request.user)
         return Response(

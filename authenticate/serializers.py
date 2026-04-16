@@ -185,6 +185,8 @@ class EngineerSerializer(serializers.ModelSerializer):
 
 
 class EngineerCreateUpdateSerializer(serializers.ModelSerializer):
+    region = serializers.CharField(required=False, allow_blank=True, default="")
+
     class Meta:
         model = Engineer
         fields = ["name", "email", "phone", "region", "status"]
@@ -195,6 +197,8 @@ class EngineerCreateUpdateSerializer(serializers.ModelSerializer):
         return value.strip()
 
     def validate_region(self, value):
+        if not value:
+            return value
         valid_regions = [r[0] for r in UserProfile.REGION_CHOICES]
         if value not in valid_regions:
             raise serializers.ValidationError(f"'{value}' is not a valid region.")
