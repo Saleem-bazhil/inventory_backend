@@ -107,7 +107,7 @@ def get_available_transitions(ticket, actor_role):
                 ticket.current_status == "closed"
                 and t["to"] == "under_observation"
                 and TicketTimeline.objects.filter(
-                    ticket=ticket, status="under_observation"
+                    ticket=ticket, to_status="under_observation"
                 ).exists()
             ):
                 continue
