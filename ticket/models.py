@@ -1,8 +1,65 @@
 from django.contrib.auth.models import User
-from django.db import models
+from django.db import models, transaction
+from django.db.models import F
 from django.utils import timezone
 
 from authenticate.models import Engineer
+
+
+# ---------------------------------------------------------------------------
+# Region-based form number counter
+# ---------------------------------------------------------------------------
+
+REGION_PREFIX = {
+    "vellore": "VLR",
+    "salem": "SAL",
+    "chennai": "CHN",
+    "kanchipuram": "KPM",
+    "hosur": "HSR",
+}
+
+
+class RegionCounter(models.Model):
+    """
+    Atomic counter per region per year.
+
+    Each row tracks the last-used form number for a (region, year) pair.
+    Uses F-expression + select_for_update to guarantee no duplicates
+    under concurrent writes.
+    """
+    region = models.CharField(max_length=20)
+    year = models.IntegerField()
+    last_number = models.IntegerField(default=0)
+
+    class Meta:
+        unique_together = ("region", "year")
+        verbose_name = "Region Counter"
+
+    def __str__(self):
+        return f"{self.region} / {self.year}: {self.last_number}"
+
+    @classmethod
+    def next_form_number(cls, region: str, year: int) -> tuple[int, str]:
+        """
+        Atomically increment and return (sequence, formatted_form_number).
+
+        Uses select_for_update (row-level lock) to prevent race conditions.
+        Returns e.g. (42, "SAL-2026-0042").
+        """
+        with transaction.atomic():
+            counter, _ = cls.objects.select_for_update().get_or_create(
+                region=region,
+                year=year,
+                defaults={"last_number": 0},
+            )
+            counter.last_number = F("last_number") + 1
+            counter.save(update_fields=["last_number"])
+            counter.refresh_from_db()
+
+            seq = counter.last_number
+            prefix = REGION_PREFIX.get(region, region.upper()[:3])
+            form_number = f"{prefix}-{year}-{seq:04d}"
+            return seq, form_number
 
 
 class Ticket(models.Model):
@@ -57,6 +114,11 @@ class Ticket(models.Model):
     ticket_number = models.CharField(
         max_length=30, unique=True, blank=True,
         verbose_name="Ticket Number",
+    )
+    form_number = models.CharField(
+        max_length=30, unique=True, blank=True, null=True,
+        verbose_name="Form Number",
+        help_text="Region-based sequential number, e.g. SAL-2026-0001",
     )
 
     # --- Work Order ---
@@ -157,16 +219,20 @@ class Ticket(models.Model):
         if is_new and not self.ticket_number:
             # Save once to obtain the auto-generated pk
             super().save(*args, **kwargs)
-            from django.utils import timezone
             year = self.created_at.year if self.created_at else timezone.now().year
             self.ticket_number = f"TKT-{year}-{self.pk:06d}"
             # Auto-generate case_id if not provided
             if not self.case_id:
                 self.case_id = f"CSO-{year}-{self.pk:06d}"
-            Ticket.objects.filter(pk=self.pk).update(
-                ticket_number=self.ticket_number,
-                case_id=self.case_id,
-            )
+            # Generate region-based form number
+            update_fields = {
+                "ticket_number": self.ticket_number,
+                "case_id": self.case_id,
+            }
+            if self.region and not self.form_number:
+                _, self.form_number = RegionCounter.next_form_number(self.region, year)
+                update_fields["form_number"] = self.form_number
+            Ticket.objects.filter(pk=self.pk).update(**update_fields)
         else:
             super().save(*args, **kwargs)
 

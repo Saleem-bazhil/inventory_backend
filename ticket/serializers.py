@@ -101,6 +101,7 @@ class TicketListSerializer(serializers.ModelSerializer):
         fields = [
             "id",
             "ticket_number",
+            "form_number",
             "work_order",
             "cust_name",
             "cust_contact",
@@ -233,6 +234,7 @@ class TicketDetailSerializer(serializers.ModelSerializer):
         fields = [
             "id",
             "ticket_number",
+            "form_number",
             "work_order",
             # Customer
             "cust_name",
