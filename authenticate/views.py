@@ -356,7 +356,7 @@ class ManagerDetailView(APIView):
 
 
 class SubAdminDetailView(APIView):
-    """PUT: update sub-admin. DELETE: deactivate sub-admin."""
+    """PUT: update sub-admin. DELETE: permanently delete sub-admin."""
     permission_classes = [permissions.IsAuthenticated, IsSuperAdmin]
 
     def _get_user(self, pk):
@@ -402,6 +402,5 @@ class SubAdminDetailView(APIView):
         user = self._get_user(pk)
         if not user:
             return Response({"detail": "Sub-admin not found."}, status=status.HTTP_404_NOT_FOUND)
-        user.is_active = False
-        user.save(update_fields=["is_active"])
+        user.delete()
         return Response(status=status.HTTP_204_NO_CONTENT)
