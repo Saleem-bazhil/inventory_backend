@@ -105,9 +105,9 @@ class SubAdminSerializer(serializers.Serializer):
     """Used by super admin to create / update sub-admins."""
     username = serializers.CharField(max_length=150)
     password = serializers.CharField(write_only=True, min_length=6, required=False)
-    email = serializers.EmailField(required=False, default="")
-    first_name = serializers.CharField(required=False, default="")
-    last_name = serializers.CharField(required=False, default="")
+    email = serializers.EmailField(required=False, default="", allow_blank=True)
+    first_name = serializers.CharField(required=False, default="", allow_blank=True)
+    last_name = serializers.CharField(required=False, default="", allow_blank=True)
     region = serializers.ChoiceField(choices=UserProfile.REGION_CHOICES)
 
     def validate_username(self, value):
@@ -132,9 +132,9 @@ class ManagerSerializer(serializers.Serializer):
     """Used by super admin to create / update managers (part approval role)."""
     username = serializers.CharField(max_length=150)
     password = serializers.CharField(write_only=True, min_length=6, required=False)
-    email = serializers.EmailField(required=False, default="")
-    first_name = serializers.CharField(required=False, default="")
-    last_name = serializers.CharField(required=False, default="")
+    email = serializers.EmailField(required=False, default="", allow_blank=True)
+    first_name = serializers.CharField(required=False, default="", allow_blank=True)
+    last_name = serializers.CharField(required=False, default="", allow_blank=True)
     region = serializers.ChoiceField(
         choices=UserProfile.REGION_CHOICES,
         required=False,
