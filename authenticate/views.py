@@ -208,9 +208,7 @@ class EngineerDetailView(APIView):
         if not engineer:
             return Response({"detail": "Engineer not found."}, status=status.HTTP_404_NOT_FOUND)
 
-        # Soft-delete: set inactive
-        engineer.status = "inactive"
-        engineer.save(update_fields=["status"])
+        engineer.delete()
         return Response(status=status.HTTP_204_NO_CONTENT)
 
 
