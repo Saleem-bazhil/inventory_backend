@@ -543,11 +543,31 @@ class BufferReleaseView(APIView):
 # Buffer Parts (simple standalone buffer)
 # ---------------------------------------------------------------------------
 
+def _can_pick_any_region(user):
+    """Admin / super_admin / manager can pick any region for buffer parts."""
+    profile = getattr(user, "userprofile", None)
+    if not profile:
+        return False
+    return profile.role in ("admin", "super_admin", "manager")
+
+
 class BufferPartListCreateView(APIView):
     permission_classes = [permissions.IsAuthenticated]
 
     def get(self, request):
         qs = BufferPart.objects.all()
+
+        profile = getattr(request.user, "userprofile", None)
+        user_region = profile.region if profile else None
+        view_mode = request.query_params.get("view", "").strip()
+        region_filter = request.query_params.get("region", "").strip()
+
+        if region_filter:
+            qs = qs.filter(region=region_filter)
+        elif view_mode == "my_region" and user_region:
+            qs = qs.filter(region=user_region)
+        # view_mode == "overall" or unset: no region filter — everyone sees all
+
         search = request.query_params.get("search", "").strip()
         if search:
             qs = qs.filter(
@@ -560,8 +580,25 @@ class BufferPartListCreateView(APIView):
         return Response({"items": serializer.data, **meta})
 
     def post(self, request):
+        profile = getattr(request.user, "userprofile", None)
         serializer = BufferPartSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
+
+        if _can_pick_any_region(request.user):
+            region = serializer.validated_data.get("region", "")
+            if not region:
+                return Response(
+                    {"region": ["This field is required."]},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+        else:
+            if not profile or not profile.region:
+                return Response(
+                    {"detail": "Your account has no region assigned."},
+                    status=status.HTTP_403_FORBIDDEN,
+                )
+            serializer.validated_data["region"] = profile.region
+
         serializer.save(created_by=request.user)
         return Response(serializer.data, status=status.HTTP_201_CREATED)
 
@@ -581,8 +618,21 @@ class BufferPartDetailView(APIView):
             obj = BufferPart.objects.get(pk=pk)
         except BufferPart.DoesNotExist:
             return Response({"detail": "Not found."}, status=status.HTTP_404_NOT_FOUND)
+
+        profile = getattr(request.user, "userprofile", None)
+        if not _can_pick_any_region(request.user):
+            if not profile or not profile.region or obj.region != profile.region:
+                return Response(
+                    {"detail": "You can only edit buffer parts in your own region."},
+                    status=status.HTTP_403_FORBIDDEN,
+                )
+
         serializer = BufferPartSerializer(obj, data=request.data, partial=True)
         serializer.is_valid(raise_exception=True)
+
+        if not _can_pick_any_region(request.user) and "region" in serializer.validated_data:
+            serializer.validated_data["region"] = obj.region
+
         serializer.save()
         return Response(BufferPartSerializer(obj).data)
 
@@ -591,5 +641,14 @@ class BufferPartDetailView(APIView):
             obj = BufferPart.objects.get(pk=pk)
         except BufferPart.DoesNotExist:
             return Response({"detail": "Not found."}, status=status.HTTP_404_NOT_FOUND)
+
+        profile = getattr(request.user, "userprofile", None)
+        if not _can_pick_any_region(request.user):
+            if not profile or not profile.region or obj.region != profile.region:
+                return Response(
+                    {"detail": "You can only delete buffer parts in your own region."},
+                    status=status.HTTP_403_FORBIDDEN,
+                )
+
         obj.delete()
         return Response(status=status.HTTP_204_NO_CONTENT)

@@ -173,6 +173,7 @@ class BufferPart(models.Model):
     part_name = models.CharField(max_length=255, verbose_name="Part Name")
     quantity = models.IntegerField(verbose_name="Quantity")
     general_name = models.CharField(max_length=255, blank=True, default="", verbose_name="General Name")
+    region = models.CharField(max_length=20, blank=True, default="", verbose_name="Region")
     created_by = models.ForeignKey(
         User, on_delete=models.SET_NULL, null=True, blank=True,
         related_name="buffer_parts",

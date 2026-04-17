@@ -143,17 +143,23 @@ class BufferStockSerializer(serializers.ModelSerializer):
 
 class BufferPartSerializer(serializers.ModelSerializer):
     created_by_name = serializers.SerializerMethodField()
+    region_display = serializers.SerializerMethodField()
 
     class Meta:
         model = BufferPart
         fields = [
             "id", "part_number", "part_name", "quantity", "general_name",
+            "region", "region_display",
             "created_by", "created_by_name", "created_at",
         ]
-        read_only_fields = ["id", "created_by", "created_at"]
+        read_only_fields = ["id", "created_by", "created_at", "region_display"]
 
     def get_created_by_name(self, obj):
         if obj.created_by:
             name = f"{obj.created_by.first_name} {obj.created_by.last_name}".strip()
             return name if name else obj.created_by.username
         return None
+
+    def get_region_display(self, obj):
+        from authenticate.models import UserProfile
+        return dict(UserProfile.REGION_CHOICES).get(obj.region, "")
