@@ -469,11 +469,13 @@ class TicketUpdateSerializer(serializers.ModelSerializer):
             "cust_contact",
             "cust_email",
             "cust_address",
+            "location",
             # Product
             "product_name",
             "serial_number",
             "model_number",
             "brand",
+            "work_order",
             "case_id",
             "condition_received",
             # Service
