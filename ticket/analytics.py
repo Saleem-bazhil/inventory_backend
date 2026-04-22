@@ -11,6 +11,7 @@ from rest_framework.views import APIView
 
 from authenticate.models import UserProfile
 from .models import DelayRecord, Ticket, TicketTimeline
+from .utils import get_sla_start_time
 
 
 def _get_user_role(user):
@@ -80,23 +81,38 @@ class DashboardOverviewView(APIView):
             ticket__in=qs,
             exited_at__isnull=True,
             sla_minutes__isnull=False,
-        )
+        ).select_related("ticket")
+        active_breached_ids = set()
         breached_count = 0
         warning_count = 0
         for entry in open_entries:
-            elapsed = (now - entry.entered_at).total_seconds() / 60
+            start_dt = get_sla_start_time(entry.ticket, entry)
+            elapsed = (now - start_dt).total_seconds() / 60
             if elapsed > entry.sla_minutes:
                 breached_count += 1
+                active_breached_ids.add(entry.ticket_id)
             elif elapsed > entry.sla_minutes * 0.75:
                 warning_count += 1
+
+        # Also count open tickets with historical delay records
+        hist_breached = (
+            DelayRecord.objects
+            .filter(ticket__in=qs)
+            .exclude(ticket_id__in=active_breached_ids)
+            .exclude(ticket__current_status="closed")
+            .values("ticket_id")
+            .distinct()
+            .count()
+        )
+        breached_count += hist_breached
 
         # Average resolution time (closed tickets)
         closed = qs.filter(closed_at__isnull=False, created_at__isnull=False)
         if closed.exists():
-            total_hours = sum(
-                (t.closed_at - t.created_at).total_seconds() / 3600
-                for t in closed[:100]  # limit for performance
-            )
+            total_hours = 0
+            for t in closed[:100]:  # limit for performance
+                start_dt = timezone.make_aware(timezone.datetime.combine(t.cso_date, timezone.datetime.min.time())) if t.cso_date else t.created_at
+                total_hours += (t.closed_at - start_dt).total_seconds() / 3600
             avg_resolution_hrs = round(total_hours / min(closed.count(), 100), 1)
         else:
             avg_resolution_hrs = 0.0
@@ -192,34 +208,88 @@ class DashboardOverviewView(APIView):
 class SLABreachesView(APIView):
     """
     GET /api/dashboard/sla-breaches/
-    Returns list of currently breached tickets with details.
+    Returns list of currently and historically breached tickets.
+    Includes:
+      1. Active stage breaches (current open timeline entry past its SLA)
+      2. Historical breaches (tickets with accumulated delay from past stages)
     """
     permission_classes = [permissions.IsAuthenticated]
 
     def get(self, request):
         now = timezone.now()
+
+        result = []
+        seen_ticket_ids = set()
+
+        # --- 1. Active stage breaches (current open entry past SLA) ---
         open_entries = TicketTimeline.objects.filter(
             exited_at__isnull=True,
             sla_minutes__isnull=False,
         ).select_related("ticket", "ticket__current_assignee")
 
-        result = []
         for entry in open_entries:
-            elapsed = (now - entry.entered_at).total_seconds() / 60
+            start_dt = get_sla_start_time(entry.ticket, entry)
+            elapsed = (now - start_dt).total_seconds() / 60
             if elapsed > entry.sla_minutes:
-                assignee = entry.ticket.current_assignee
+                ticket = entry.ticket
+                assignee = ticket.current_assignee
+                # Also include accumulated historical delay
+                historical = DelayRecord.objects.filter(
+                    ticket=ticket,
+                ).aggregate(total=Sum("delay_minutes"))
+                total_hist = historical["total"] or 0
+                current_breach = round(elapsed - entry.sla_minutes)
+
                 result.append({
                     "id": f"breach-{entry.id}",
-                    "ticket_id": entry.ticket_id,
-                    "ticket_number": entry.ticket.ticket_number,
+                    "ticket_id": ticket.id,
+                    "ticket_number": ticket.ticket_number,
                     "current_status": entry.to_status,
                     "responsible_role": entry.responsible_role or "",
                     "responsible_user": (
                         assignee.get_full_name() or assignee.username
                     ) if assignee else None,
-                    "delay_minutes": round(elapsed - entry.sla_minutes),
+                    "delay_minutes": current_breach + total_hist,
                     "entered_at": entry.entered_at.isoformat(),
                     "sla_minutes": entry.sla_minutes,
+                })
+                seen_ticket_ids.add(ticket.id)
+
+        # --- 2. Historical breaches (tickets with past delay records
+        #     whose current stage is NOT actively breached) ---
+        from django.db.models import Sum as DjSum
+        delay_tickets = (
+            DelayRecord.objects
+            .exclude(ticket_id__in=seen_ticket_ids)
+            .values("ticket_id")
+            .annotate(total_delay=DjSum("delay_minutes"))
+            .filter(total_delay__gt=0)
+            .order_by("-total_delay")
+        )
+
+        if delay_tickets:
+            ticket_ids = [d["ticket_id"] for d in delay_tickets]
+            delay_map = {d["ticket_id"]: d["total_delay"] for d in delay_tickets}
+            tickets = Ticket.objects.filter(
+                id__in=ticket_ids,
+            ).exclude(
+                current_status="closed",
+            ).select_related("current_assignee")
+
+            for ticket in tickets:
+                assignee = ticket.current_assignee
+                result.append({
+                    "id": f"hist-delay-{ticket.id}",
+                    "ticket_id": ticket.id,
+                    "ticket_number": ticket.ticket_number,
+                    "current_status": ticket.current_status,
+                    "responsible_role": "",
+                    "responsible_user": (
+                        assignee.get_full_name() or assignee.username
+                    ) if assignee else None,
+                    "delay_minutes": delay_map[ticket.id],
+                    "entered_at": ticket.created_at.isoformat() if ticket.created_at else "",
+                    "sla_minutes": 0,
                 })
 
         result.sort(key=lambda x: x["delay_minutes"], reverse=True)
@@ -314,10 +384,10 @@ class EngineerPerformanceView(APIView):
                 closed_at__isnull=False,
             )
             if closed_tickets.exists():
-                total_hrs = sum(
-                    (t.closed_at - t.created_at).total_seconds() / 3600
-                    for t in closed_tickets[:50]
-                )
+                total_hrs = 0
+                for t in closed_tickets[:50]:
+                    start_dt = timezone.make_aware(timezone.datetime.combine(t.cso_date, timezone.datetime.min.time())) if t.cso_date else t.created_at
+                    total_hrs += (t.closed_at - start_dt).total_seconds() / 3600
                 avg_hrs = round(total_hrs / min(closed_tickets.count(), 50), 1)
             else:
                 avg_hrs = 0.0
@@ -434,7 +504,8 @@ class TicketAgingView(APIView):
             count = 0
             breached = 0
             for t in open_tickets:
-                age_mins = (now - t.created_at).total_seconds() / 60
+                start_dt = timezone.make_aware(timezone.datetime.combine(t.cso_date, timezone.datetime.min.time())) if t.cso_date else t.created_at
+                age_mins = (now - start_dt).total_seconds() / 60
                 if low <= age_mins < high:
                     count += 1
                     # Check if currently breached
@@ -472,10 +543,10 @@ class RegionComparisonView(APIView):
 
             closed = qs.filter(closed_at__isnull=False)
             if closed.exists():
-                total_hrs = sum(
-                    (t.closed_at - t.created_at).total_seconds() / 3600
-                    for t in closed[:50]
-                )
+                total_hrs = 0
+                for t in closed[:50]:
+                    start_dt = timezone.make_aware(timezone.datetime.combine(t.cso_date, timezone.datetime.min.time())) if t.cso_date else t.created_at
+                    total_hrs += (t.closed_at - start_dt).total_seconds() / 3600
                 avg_hrs = round(total_hrs / min(closed.count(), 50), 1)
             else:
                 avg_hrs = 0.0

@@ -10,6 +10,7 @@ from django.db import transaction
 from django.utils import timezone
 
 from .models import DelayRecord, SLAConfig, Ticket, TicketTimeline
+from .utils import get_sla_start_time
 
 
 # ---------------------------------------------------------------------------
@@ -172,7 +173,8 @@ def transition_ticket(ticket, to_status, actor, actor_role, comment=None, metada
 
     if current_entry:
         current_entry.exited_at = now
-        delta = now - current_entry.entered_at
+        start_dt = get_sla_start_time(ticket, current_entry)
+        delta = now - start_dt
         current_entry.duration_minutes = int(delta.total_seconds() / 60)
 
         # Check SLA breach

@@ -5,6 +5,7 @@ from rest_framework import serializers
 
 from authenticate.models import Engineer
 from .models import DelayRecord, Ticket, TicketTimeline
+from .utils import get_sla_start_time
 
 
 # ---------------------------------------------------------------------------
@@ -125,6 +126,7 @@ class TicketListSerializer(serializers.ModelSerializer):
             "arrival_date",
             "target_completion",
             "closed_at",
+            "cso_date",
             "created_at",
             "updated_at",
             # Computed
@@ -157,7 +159,8 @@ class TicketListSerializer(serializers.ModelSerializer):
         entry = self._current_timeline(obj)
         if entry is None or entry.sla_minutes is None:
             return "on_track"
-        elapsed = (timezone.now() - entry.entered_at).total_seconds() / 60
+        start_dt = get_sla_start_time(obj, entry)
+        elapsed = (timezone.now() - start_dt).total_seconds() / 60
         if elapsed > entry.sla_minutes:
             return "breached"
         ratio = elapsed / entry.sla_minutes if entry.sla_minutes else 0
@@ -169,14 +172,16 @@ class TicketListSerializer(serializers.ModelSerializer):
         entry = self._current_timeline(obj)
         if entry is None or entry.sla_minutes is None:
             return None
-        elapsed = (timezone.now() - entry.entered_at).total_seconds() / 60
+        start_dt = get_sla_start_time(obj, entry)
+        elapsed = (timezone.now() - start_dt).total_seconds() / 60
         return max(0, int(entry.sla_minutes - elapsed))
 
     def get_current_stage_elapsed_mins(self, obj):
         entry = self._current_timeline(obj)
         if entry is None:
             return 0
-        return int((timezone.now() - entry.entered_at).total_seconds() / 60)
+        start_dt = get_sla_start_time(obj, entry)
+        return int((timezone.now() - start_dt).total_seconds() / 60)
 
     def get_total_delay_mins(self, obj):
         result = DelayRecord.objects.filter(ticket=obj).aggregate(
@@ -285,6 +290,7 @@ class TicketDetailSerializer(serializers.ModelSerializer):
             "otp_verified",
             "otp_verified_at",
             # Dates
+            "cso_date",
             "arrival_date",
             "target_completion",
             "closed_at",
@@ -317,7 +323,8 @@ class TicketDetailSerializer(serializers.ModelSerializer):
         entry = self._current_timeline(obj)
         if entry is None or entry.sla_minutes is None:
             return "on_track"
-        elapsed = (timezone.now() - entry.entered_at).total_seconds() / 60
+        start_dt = get_sla_start_time(obj, entry)
+        elapsed = (timezone.now() - start_dt).total_seconds() / 60
         if elapsed > entry.sla_minutes:
             return "breached"
         ratio = elapsed / entry.sla_minutes if entry.sla_minutes else 0
@@ -329,14 +336,16 @@ class TicketDetailSerializer(serializers.ModelSerializer):
         entry = self._current_timeline(obj)
         if entry is None or entry.sla_minutes is None:
             return None
-        elapsed = (timezone.now() - entry.entered_at).total_seconds() / 60
+        start_dt = get_sla_start_time(obj, entry)
+        elapsed = (timezone.now() - start_dt).total_seconds() / 60
         return max(0, int(entry.sla_minutes - elapsed))
 
     def get_current_stage_elapsed_mins(self, obj):
         entry = self._current_timeline(obj)
         if entry is None:
             return 0
-        return int((timezone.now() - entry.entered_at).total_seconds() / 60)
+        start_dt = get_sla_start_time(obj, entry)
+        return int((timezone.now() - start_dt).total_seconds() / 60)
 
     def get_total_delay_mins(self, obj):
         result = DelayRecord.objects.filter(ticket=obj).aggregate(
@@ -437,6 +446,7 @@ class TicketCreateSerializer(serializers.ModelSerializer):
             "explanation",
             "customer_comments",
             # Dates
+            "cso_date",
             "arrival_date",
             "target_completion",
             # Region (may be set automatically)
@@ -488,6 +498,7 @@ class TicketUpdateSerializer(serializers.ModelSerializer):
             "explanation",
             "customer_comments",
             # Dates
+            "cso_date",
             "arrival_date",
             "target_completion",
             # Region

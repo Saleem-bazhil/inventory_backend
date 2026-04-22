@@ -58,7 +58,8 @@ class RegionCounter(models.Model):
 
             seq = counter.last_number
             prefix = REGION_PREFIX.get(region, region.upper()[:3])
-            form_number = f"{prefix}-{year}-{seq:04d}"
+            year_suffix = str(year)[-2:]
+            form_number = f"{prefix}{year_suffix}-{seq}"
             return seq, form_number
 
 
@@ -136,7 +137,7 @@ class Ticket(models.Model):
     serial_number = models.CharField(max_length=100, verbose_name="Serial Number", blank=True, null=True)
     model_number = models.CharField(max_length=100, verbose_name="Model Number", blank=True, null=True)
     brand = models.CharField(max_length=100, verbose_name="Brand", blank=True, null=True)
-    case_id = models.CharField(max_length=100, verbose_name="Case ID", unique=True, blank=True, default="")
+    case_id = models.CharField(max_length=100, verbose_name="Case ID", unique=True, blank=True, null=True)
     condition_received = models.TextField(verbose_name="Condition Received", blank=True, null=True)
 
     # --- Service details ---
@@ -199,6 +200,7 @@ class Ticket(models.Model):
     otp_verified_at = models.DateTimeField(null=True, blank=True, verbose_name="OTP Verified At")
 
     # --- Dates ---
+    cso_date = models.DateField(verbose_name="CSO Date", blank=True, null=True)
     arrival_date = models.DateField(verbose_name="Arrival Date", blank=True, null=True)
     target_completion = models.DateField(verbose_name="Target Completion", blank=True, null=True)
     closed_at = models.DateTimeField(null=True, blank=True, verbose_name="Closed At")
@@ -215,19 +217,20 @@ class Ticket(models.Model):
 
     def save(self, *args, **kwargs):
         is_new = self.pk is None
+        
+        # Convert empty case_id to None to prevent unique constraint violation
+        if not self.case_id:
+            self.case_id = None
+
         # Need to save first to get the pk for ticket_number generation
         if is_new and not self.ticket_number:
             # Save once to obtain the auto-generated pk
             super().save(*args, **kwargs)
             year = self.created_at.year if self.created_at else timezone.now().year
             self.ticket_number = f"TKT-{year}-{self.pk:06d}"
-            # Auto-generate case_id if not provided
-            if not self.case_id:
-                self.case_id = f"CSO-{year}-{self.pk:06d}"
             # Generate region-based form number
             update_fields = {
                 "ticket_number": self.ticket_number,
-                "case_id": self.case_id,
             }
             if self.region and not self.form_number:
                 _, self.form_number = RegionCounter.next_form_number(self.region, year)
