@@ -659,3 +659,52 @@ class BufferPartDetailView(APIView):
 
         obj.delete()
         return Response(status=status.HTTP_204_NO_CONTENT)
+
+
+# ---------------------------------------------------------------------------
+# Buffer Parts — Summary (region-wise totals)
+# ---------------------------------------------------------------------------
+
+class BufferPartSummaryView(APIView):
+    """
+    GET /api/buffer-parts/summary/
+    Returns region-wise quantity totals and an overall total.
+    - super_admin / manager → all regions
+    - sub_admin → only their own region
+    """
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get(self, request):
+        from django.db.models import Sum
+
+        qs = BufferPart.objects.all()
+
+        # Use the same view/region logic as the list endpoint
+        profile = getattr(request.user, "userprofile", None)
+        user_region = profile.region if profile else None
+        view_mode = request.query_params.get("view", "").strip()
+        region_filter = request.query_params.get("region", "").strip()
+
+        if region_filter:
+            qs = qs.filter(region=region_filter)
+        elif view_mode == "my_region" and user_region:
+            qs = qs.filter(region=user_region)
+        # view_mode == "overall" or unset: no region filter
+
+        regions = (
+            qs.values("region")
+            .annotate(total=Sum("quantity"))
+            .order_by("region")
+        )
+
+        region_list = [
+            {"region": r["region"] or "unassigned", "total": r["total"] or 0}
+            for r in regions
+        ]
+        grand_total = sum(r["total"] for r in region_list)
+
+        return Response({
+            "regions": region_list,
+            "total": grand_total,
+        })
+
