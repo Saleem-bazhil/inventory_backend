@@ -174,6 +174,22 @@ class BufferPart(models.Model):
     quantity = models.IntegerField(verbose_name="Quantity")
     general_name = models.CharField(max_length=255, blank=True, default="", verbose_name="General Name")
     region = models.CharField(max_length=20, blank=True, default="", verbose_name="Region")
+    status = models.CharField(
+        max_length=30,
+        choices=[
+            ("BUFFER_IN", "BUFFER In"),
+            ("OUT", "Out"),
+            ("DEFECTIVE_RETURN", "Defective Return"),
+            ("REORDER", "Reorder"),
+            ("PART_RECEIVED", "Part Received"),
+            ("CLOSED", "Closed"),
+        ],
+        default="BUFFER_IN",
+        verbose_name="Status",
+    )
+    engineer_name = models.CharField(max_length=255, blank=True, default="", verbose_name="Engineer Name")
+    case_id = models.CharField(max_length=100, blank=True, default="", verbose_name="Case ID")
+    transition_history = models.JSONField(default=list, blank=True, verbose_name="Transition History")
     created_by = models.ForeignKey(
         User, on_delete=models.SET_NULL, null=True, blank=True,
         related_name="buffer_parts",

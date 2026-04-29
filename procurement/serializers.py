@@ -149,7 +149,7 @@ class BufferPartSerializer(serializers.ModelSerializer):
         model = BufferPart
         fields = [
             "id", "part_number", "part_name", "quantity", "general_name",
-            "region", "region_display",
+            "region", "region_display", "status", "engineer_name", "case_id", "transition_history",
             "created_by", "created_by_name", "created_at",
         ]
         read_only_fields = ["id", "created_by", "created_at", "region_display"]
