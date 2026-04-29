@@ -17,6 +17,14 @@ from .serializers import (
     StockMovementSerializer,
 )
 
+BUFFER_PART_TRANSITIONS = {
+    "BUFFER_IN": "OUT",
+    "OUT": "DEFECTIVE_RETURN",
+    "DEFECTIVE_RETURN": "REORDER",
+    "REORDER": "PART_RECEIVED",
+    "PART_RECEIVED": "CLOSED",
+}
+
 
 def paginate_queryset(queryset, request):
     """Shared pagination helper. Returns (page_qs, meta_dict)."""
@@ -659,6 +667,64 @@ class BufferPartDetailView(APIView):
 
         obj.delete()
         return Response(status=status.HTTP_204_NO_CONTENT)
+
+
+class BufferPartTransitionView(APIView):
+    permission_classes = [permissions.IsAuthenticated]
+
+    def post(self, request, pk):
+        try:
+            obj = BufferPart.objects.get(pk=pk)
+        except BufferPart.DoesNotExist:
+            return Response({"detail": "Not found."}, status=status.HTTP_404_NOT_FOUND)
+
+        profile = getattr(request.user, "userprofile", None)
+        if not _can_pick_any_region(request.user):
+            if not profile or not profile.region or obj.region != profile.region:
+                return Response(
+                    {"detail": "You can only transition buffer parts in your own region."},
+                    status=status.HTTP_403_FORBIDDEN,
+                )
+
+        current_status = obj.status or "BUFFER_IN"
+        next_status = BUFFER_PART_TRANSITIONS.get(current_status)
+        if not next_status:
+            return Response(
+                {"detail": "No transition available for current status."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        engineer_name = (request.data.get("engineer_name") or "").strip()
+        case_id = (request.data.get("case_id") or "").strip()
+        comment = (request.data.get("remarks") or "").strip()
+
+        if current_status == "BUFFER_IN":
+            if not engineer_name:
+                return Response({"engineer_name": ["This field is required."]}, status=status.HTTP_400_BAD_REQUEST)
+            if not case_id:
+                return Response({"case_id": ["This field is required."]}, status=status.HTTP_400_BAD_REQUEST)
+            obj.engineer_name = engineer_name
+            obj.case_id = case_id
+
+        history = list(obj.transition_history or [])
+        actor_name = f"{request.user.first_name} {request.user.last_name}".strip() or request.user.username
+        entry = {
+            "from_status": current_status,
+            "to_status": next_status,
+            "comment": comment,
+            "updated_by": actor_name,
+            "timestamp": timezone.now().isoformat(),
+        }
+        if current_status == "BUFFER_IN":
+            entry["engineer_name"] = obj.engineer_name
+            entry["case_id"] = obj.case_id
+
+        history.append(entry)
+        obj.status = next_status
+        obj.transition_history = history
+        obj.save(update_fields=["status", "engineer_name", "case_id", "transition_history"])
+
+        return Response(BufferPartSerializer(obj).data)
 
 
 # ---------------------------------------------------------------------------
