@@ -30,6 +30,8 @@ class MaterialTrack(models.Model):
     AMC = "amc"
     RENTAL = "rental"
     TRADE = "trade"
+    RCA = "rca"
+    ACCESSORIES = "accessories"
     SERVICE_TYPE_CHOICES = (
         (WARRANTY, "Warranty"),
         (NON_WARRANTY, "Non Warranty"),
@@ -37,6 +39,8 @@ class MaterialTrack(models.Model):
         (AMC, "AMC"),
         (RENTAL, "Rental"),
         (TRADE, "Trade"),
+        (RCA, "RCA"),
+        (ACCESSORIES, "Accessories"),
     )
 
     # --- Call Status Choices ---

@@ -93,6 +93,8 @@ class Ticket(models.Model):
         ("amc", "AMC"),
         ("rental", "Rental"),
         ("trade", "Trade"),
+        ("rca", "RCA"),
+        ("accessories", "Accessories"),
     )
 
     # --- Priority choices ---
