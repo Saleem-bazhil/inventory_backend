@@ -412,9 +412,13 @@ class AvailableTransitionsView(APIView):
         status_labels = dict(Ticket.TICKET_STATUS_CHOICES)
         result = []
         for t in available:
+            label = status_labels.get(t["to"], t["to"])
+            if ticket.current_status == "diagnosis" and t["to"] == "closed":
+                label = "Return Product"
+
             result.append({
                 "to_status": t["to"],
-                "label": status_labels.get(t["to"], t["to"]),
+                "label": label,
                 "requires_comment": t["to"] in ("closed", "quotation_sent"),
             })
 
