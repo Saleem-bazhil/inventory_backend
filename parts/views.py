@@ -61,6 +61,9 @@ class PartRequestListCreateView(APIView):
         if profile and profile.role not in [UserProfile.ADMIN, UserProfile.SUPER_ADMIN]:
             if profile.region:
                 qs = qs.filter(ticket__region=profile.region)
+            elif profile.role == UserProfile.MANAGER:
+                # Managers with no region (meaning 'All regions') can see all requests
+                pass
             else:
                 # If no region assigned to non-admin, they see nothing by default
                 qs = qs.none()
@@ -206,6 +209,9 @@ class PendingPartRequestsView(APIView):
         if profile and profile.role not in [UserProfile.ADMIN, UserProfile.SUPER_ADMIN]:
             if profile.region:
                 qs = qs.filter(ticket__region=profile.region)
+            elif profile.role == UserProfile.MANAGER:
+                # Managers with no region (meaning 'All regions') can see all requests
+                pass
             else:
                 qs = qs.none()
 
