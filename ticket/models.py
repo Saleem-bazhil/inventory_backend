@@ -350,3 +350,32 @@ class DelayRecord(models.Model):
             f"Delay on {self.ticket.ticket_number} @ {self.status}: "
             f"+{self.delay_minutes} min ({self.delay_category})"
         )
+
+
+class ActivityCharge(models.Model):
+    REGION_CHOICES = (
+        ("vellore", "Vellore"),
+        ("salem", "Salem"),
+        ("chennai", "Chennai"),
+        ("kanchipuram", "Kanchipuram"),
+        ("hosur", "Hosur"),
+    )
+
+    region = models.CharField(max_length=20, choices=REGION_CHOICES, verbose_name="Region")
+    activity_name = models.CharField(max_length=255, verbose_name="Activity Name")
+    amount = models.DecimalField(max_digits=12, decimal_places=2, verbose_name="Amount")
+    remarks = models.TextField(blank=True, default="", verbose_name="Remarks")
+    created_by = models.ForeignKey(
+        User, on_delete=models.SET_NULL, null=True, blank=True,
+        related_name="activity_charges", verbose_name="Created By"
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        verbose_name = "Activity Charge"
+        verbose_name_plural = "Activity Charges"
+        ordering = ["-created_at"]
+
+    def __str__(self):
+        return f"{self.activity_name} ({self.get_region_display()}): {self.amount}"
