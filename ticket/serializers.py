@@ -4,7 +4,7 @@ from django.utils import timezone
 from rest_framework import serializers
 
 from authenticate.models import Engineer
-from .models import DelayRecord, Ticket, TicketTimeline
+from .models import ActivityCharge, DelayRecord, Ticket, TicketTimeline
 from .utils import get_sla_start_time
 
 
@@ -543,3 +543,31 @@ class AvailableTransitionSerializer(serializers.Serializer):
     to_status = serializers.CharField()
     label = serializers.CharField()
     requires_comment = serializers.BooleanField()
+
+
+# ---------------------------------------------------------------------------
+# Activity Charge
+# ---------------------------------------------------------------------------
+
+class ActivityChargeSerializer(serializers.ModelSerializer):
+    created_by_detail = serializers.SerializerMethodField(read_only=True)
+    region_display = serializers.CharField(source="get_region_display", read_only=True)
+
+    class Meta:
+        model = ActivityCharge
+        fields = [
+            "id",
+            "region",
+            "region_display",
+            "activity_name",
+            "amount",
+            "remarks",
+            "created_by",
+            "created_by_detail",
+            "created_at",
+            "updated_at",
+        ]
+        read_only_fields = ["created_by", "created_at", "updated_at"]
+
+    def get_created_by_detail(self, obj):
+        return _user_summary(obj.created_by)
