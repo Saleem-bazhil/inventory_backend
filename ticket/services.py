@@ -23,6 +23,7 @@ WORKFLOW_TRANSITIONS = {
     "diagnosis": [
         {"to": "part_requested", "roles": ["engineer", "sub_admin", "admin"]},
         {"to": "in_progress", "roles": ["engineer", "sub_admin", "admin"]},
+        {"to": "closed", "roles": ["engineer", "sub_admin", "admin"]},
     ],
     "part_requested": [
         # Only manager / admin can approve parts — sub_admin is explicitly excluded
@@ -100,15 +101,22 @@ def get_available_transitions(ticket, actor_role):
     available = []
     for t in transitions:
         if actor_role in t["roles"]:
-            # Block closed → under_observation if ticket already went through it (final close)
             if (
                 ticket.current_status == "closed"
                 and t["to"] == "under_observation"
-                and TicketTimeline.objects.filter(
-                    ticket=ticket, to_status="under_observation"
-                ).exists()
             ):
-                continue
+                # Block closed → under_observation if ticket already went through it (final close)
+                if TicketTimeline.objects.filter(
+                    ticket=ticket, to_status="under_observation"
+                ).exists():
+                    continue
+
+                # Also block if it was closed via Return Product (from diagnosis)
+                if TicketTimeline.objects.filter(
+                    ticket=ticket, to_status="closed", from_status="diagnosis"
+                ).exists():
+                    continue
+
             available.append(t)
     return available
 

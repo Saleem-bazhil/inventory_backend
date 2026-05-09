@@ -89,9 +89,12 @@ class Ticket(models.Model):
     SERVICE_TYPE_CHOICES = (
         ("warranty", "Warranty"),
         ("non_warranty", "Non Warranty"),
-        ("doc", "DOC"),
+        ("doa", "DOA"),
         ("amc", "AMC"),
         ("rental", "Rental"),
+        ("trade", "Trade"),
+        ("rca", "RCA"),
+        ("accessories", "Accessories"),
     )
 
     # --- Priority choices ---

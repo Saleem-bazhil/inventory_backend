@@ -56,6 +56,18 @@ class PartRequestListCreateView(APIView):
     def get(self, request):
         qs = PartRequest.objects.select_related('requested_by', 'approved_by', 'ticket').all()
 
+        # Regional isolation
+        profile = getattr(request.user, "userprofile", None)
+        if profile and profile.role not in [UserProfile.ADMIN, UserProfile.SUPER_ADMIN]:
+            if profile.region:
+                qs = qs.filter(ticket__region=profile.region)
+            elif profile.role == UserProfile.MANAGER:
+                # Managers with no region (meaning 'All regions') can see all requests
+                pass
+            else:
+                # If no region assigned to non-admin, they see nothing by default
+                qs = qs.none()
+
         ticket_id = request.query_params.get('ticket_id')
         if ticket_id:
             qs = qs.filter(ticket_id=ticket_id)
@@ -67,6 +79,10 @@ class PartRequestListCreateView(APIView):
         urgency = request.query_params.get('urgency')
         if urgency:
             qs = qs.filter(urgency=urgency)
+
+        region_filter = request.query_params.get('region')
+        if region_filter:
+            qs = qs.filter(ticket__region=region_filter)
 
         page_qs, meta = paginate_queryset(qs, request)
         serializer = PartRequestSerializer(page_qs, many=True)
@@ -187,6 +203,21 @@ class PendingPartRequestsView(APIView):
         qs = PartRequest.objects.select_related(
             'requested_by', 'approved_by', 'ticket',
         ).filter(status='pending')
+
+        # Regional isolation
+        profile = getattr(request.user, "userprofile", None)
+        if profile and profile.role not in [UserProfile.ADMIN, UserProfile.SUPER_ADMIN]:
+            if profile.region:
+                qs = qs.filter(ticket__region=profile.region)
+            elif profile.role == UserProfile.MANAGER:
+                # Managers with no region (meaning 'All regions') can see all requests
+                pass
+            else:
+                qs = qs.none()
+
+        region_filter = request.query_params.get('region')
+        if region_filter:
+            qs = qs.filter(ticket__region=region_filter)
 
         page_qs, meta = paginate_queryset(qs, request)
         serializer = PartRequestSerializer(page_qs, many=True)

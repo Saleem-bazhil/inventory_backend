@@ -18,21 +18,23 @@ class UserMiniSerializer(serializers.Serializer):
 
 
 class PartRequestSerializer(serializers.ModelSerializer):
-    requested_by_detail = UserMiniSerializer(source='requested_by', read_only=True)
-    approved_by_detail = UserMiniSerializer(source='approved_by', read_only=True)
+    requested_by = UserMiniSerializer(read_only=True)
+    approved_by = UserMiniSerializer(read_only=True)
     ticket_number = serializers.SerializerMethodField()
+    region = serializers.CharField(source='ticket.region', read_only=True)
+    region_display = serializers.CharField(source='ticket.get_region_display', read_only=True)
     urgency_display = serializers.CharField(source='get_urgency_display', read_only=True)
     status_display = serializers.CharField(source='get_status_display', read_only=True)
 
     class Meta:
         model = PartRequest
         fields = [
-            'id', 'ticket', 'ticket_number',
-            'requested_by', 'requested_by_detail',
+            'id', 'ticket', 'ticket_number', 'region', 'region_display',
+            'requested_by',
             'part_number', 'part_name', 'description',
             'quantity', 'urgency', 'urgency_display',
             'estimated_cost', 'status', 'status_display',
-            'approved_by', 'approved_by_detail',
+            'approved_by',
             'approved_at', 'rejection_reason',
             'received_at', 'created_at', 'updated_at',
         ]
