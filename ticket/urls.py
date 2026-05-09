@@ -1,6 +1,8 @@
 from django.urls import path
 
 from .views import (
+    ActivityChargeDetailView,
+    ActivityChargeListCreateView,
     AvailableTransitionsView,
     BreachedTicketsView,
     MyQueueView,
@@ -41,4 +43,7 @@ urlpatterns = [
     path("tickets/<int:pk>/transition/", TicketTransitionView.as_view()),
     path("tickets/<int:pk>/transitions/", AvailableTransitionsView.as_view()),
     path("tickets/<int:pk>/timeline/", TicketTimelineView.as_view()),
+    # Activity Charges
+    path("activity-charges/", ActivityChargeListCreateView.as_view()),
+    path("activity-charges/<int:pk>/", ActivityChargeDetailView.as_view()),
 ]

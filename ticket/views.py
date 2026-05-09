@@ -13,8 +13,9 @@ from authenticate.models import Engineer, UserProfile
 # OTP disabled — uncomment when SMS provider is available
 # from material.sms import send_otp_sms, verify_otp
 
-from .models import DelayRecord, Ticket, TicketTimeline
+from .models import ActivityCharge, DelayRecord, Ticket, TicketTimeline
 from .serializers import (
+    ActivityChargeSerializer,
     AvailableTransitionSerializer,
     TicketCreateSerializer,
     TicketDetailSerializer,
@@ -591,3 +592,104 @@ class BreachedTicketsView(APIView):
         items_qs, meta = _paginate(qs, request)
         serializer = TicketListSerializer(items_qs, many=True)
         return Response({"items": serializer.data, **meta})
+
+
+# ---------------------------------------------------------------------------
+# Activity Charge Views
+# ---------------------------------------------------------------------------
+
+class ActivityChargeListCreateView(APIView):
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get(self, request):
+        user = request.user
+        role = get_user_role(user)
+        profile = getattr(user, "userprofile", None)
+
+        if role in ("admin", "super_admin"):
+            qs = ActivityCharge.objects.all()
+        elif profile and profile.region:
+            qs = ActivityCharge.objects.filter(region=profile.region)
+        else:
+            qs = ActivityCharge.objects.filter(created_by=user)
+
+        params = request.query_params
+        search = params.get("search", "").strip()
+        if search:
+            qs = qs.filter(
+                Q(activity_name__icontains=search)
+                | Q(remarks__icontains=search)
+            )
+
+        filter_region = params.get("region", "").strip()
+        if filter_region and role in ("admin", "super_admin"):
+            qs = qs.filter(region=filter_region)
+
+        items_qs, meta = _paginate(qs, request)
+        serializer = ActivityChargeSerializer(items_qs, many=True)
+        return Response({"items": serializer.data, **meta})
+
+    def post(self, request):
+        serializer = ActivityChargeSerializer(data=request.data)
+        if not serializer.is_valid():
+            return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+        charge = serializer.save(created_by=request.user)
+        return Response(
+            ActivityChargeSerializer(charge).data,
+            status=status.HTTP_201_CREATED,
+        )
+
+
+class ActivityChargeDetailView(APIView):
+    permission_classes = [permissions.IsAuthenticated]
+
+    def _get_charge(self, request, pk):
+        try:
+            charge = ActivityCharge.objects.get(pk=pk)
+        except ActivityCharge.DoesNotExist:
+            return None
+
+        user = request.user
+        role = get_user_role(user)
+        profile = getattr(user, "userprofile", None)
+
+        if role in ("admin", "super_admin"):
+            return charge
+        if profile and profile.region and charge.region == profile.region:
+            return charge
+        if charge.created_by == user:
+            return charge
+        return None
+
+    def get(self, request, pk):
+        charge = self._get_charge(request, pk)
+        if charge is None:
+            return Response(
+                {"detail": "Activity charge not found."},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+        return Response(ActivityChargeSerializer(charge).data)
+
+    def put(self, request, pk):
+        charge = self._get_charge(request, pk)
+        if charge is None:
+            return Response(
+                {"detail": "Activity charge not found."},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+        serializer = ActivityChargeSerializer(charge, data=request.data, partial=True)
+        if not serializer.is_valid():
+            return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+        serializer.save()
+        return Response(ActivityChargeSerializer(charge).data)
+
+    def delete(self, request, pk):
+        charge = self._get_charge(request, pk)
+        if charge is None:
+            return Response(
+                {"detail": "Activity charge not found."},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+        charge.delete()
+        return Response(status=status.HTTP_204_NO_CONTENT)
