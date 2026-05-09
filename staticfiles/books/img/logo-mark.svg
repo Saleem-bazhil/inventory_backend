@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 96 96" role="img" aria-labelledby="logoMarkTitle">
+  <title id="logoMarkTitle">RenderWays Mark</title>
+  <circle cx="48" cy="48" r="48" fill="#ffffff"/>
+  <path d="M27 20h25.5c15 0 24.5 8.8 24.5 23.3 0 10.1-4.8 17.1-12.8 22.7l-9-9.3c4.4-3.2 7.1-7 7.1-12.4 0-7.9-5.5-12.7-14.7-12.7H41v26.8L27 72.8V20z" fill="#f4267e"/>
+  <path d="M27 72.8 48.2 50l21.4 22.8H57.1L48.2 63 39.6 72.8H27z" fill="#343393"/>
+</svg>

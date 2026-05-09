@@ -16,7 +16,7 @@ SECRET_KEY = os.environ.get(
     "DJANGO_SECRET_KEY",
     "django-insecure-eqem)23jqdvtj64m85suojxx-=bt^q@i-mvkg8hpot_-)6$*2d",
 )
-DEBUG = os.environ.get("DEBUG", "False").lower() == "true"
+DEBUG = True
 
 ALLOWED_HOSTS = os.environ.get("ALLOWED_HOSTS", "inventory.bazhilgroups.in,localhost,127.0.0.1").split(",")
 
