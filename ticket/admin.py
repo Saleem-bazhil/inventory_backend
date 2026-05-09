@@ -1,7 +1,7 @@
 from django.contrib import admin
 from unfold.admin import ModelAdmin
 
-from .models import DelayRecord, SLAConfig, Ticket, TicketTimeline
+from .models import ActivityCharge, DelayRecord, SLAConfig, Ticket, TicketTimeline
 
 
 @admin.register(Ticket)
@@ -87,3 +87,17 @@ class DelayRecordAdmin(ModelAdmin):
     list_filter = ["delay_category", "status", "responsible_role"]
     search_fields = ["ticket__ticket_number", "reason"]
     raw_id_fields = ["ticket", "timeline_entry", "responsible_user", "acknowledged_by"]
+
+
+@admin.register(ActivityCharge)
+class ActivityChargeAdmin(ModelAdmin):
+    list_display = [
+        "activity_name",
+        "region",
+        "amount",
+        "created_by",
+        "created_at",
+    ]
+    list_filter = ["region", "created_at"]
+    search_fields = ["activity_name", "remarks"]
+    raw_id_fields = ["created_by"]
