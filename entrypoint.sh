@@ -24,5 +24,4 @@ echo "Starting gunicorn..."
 exec gunicorn ainventory.wsgi:application \
     --bind 0.0.0.0:7000 \
     --workers 3 \
-    --threads 2 \
     --timeout 120
