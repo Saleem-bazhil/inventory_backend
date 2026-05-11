@@ -362,6 +362,10 @@ class ActivityCharge(models.Model):
     )
 
     region = models.CharField(max_length=20, choices=REGION_CHOICES, verbose_name="Region")
+    ticket = models.ForeignKey(
+        Ticket, on_delete=models.CASCADE, null=True, blank=True,
+        related_name="activity_charges", verbose_name="Ticket"
+    )
     activity_name = models.CharField(max_length=255, verbose_name="Activity Name")
     amount = models.DecimalField(max_digits=12, decimal_places=2, verbose_name="Amount")
     remarks = models.TextField(blank=True, default="", verbose_name="Remarks")
