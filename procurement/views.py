@@ -21,6 +21,7 @@ BUFFER_PART_TRANSITIONS = {
     "BUFFER_IN": "OUT",
     "OUT": "DEFECTIVE_RETURN",
     "DEFECTIVE_RETURN": "REORDER",
+    "UNUSED_RETURN": "OUT",
     "REORDER": "PART_RECEIVED",
     "PART_RECEIVED": "CLOSED",
 }
@@ -687,7 +688,14 @@ class BufferPartTransitionView(APIView):
                 )
 
         current_status = obj.status or "BUFFER_IN"
-        next_status = BUFFER_PART_TRANSITIONS.get(current_status)
+        
+        # Allow explicit branching via request data (e.g., for "Unused Return")
+        requested_to_status = request.data.get("to_status")
+        if requested_to_status:
+            next_status = requested_to_status
+        else:
+            next_status = BUFFER_PART_TRANSITIONS.get(current_status)
+
         if not next_status:
             return Response(
                 {"detail": "No transition available for current status."},
@@ -698,7 +706,7 @@ class BufferPartTransitionView(APIView):
         case_id = (request.data.get("case_id") or "").strip()
         comment = (request.data.get("remarks") or "").strip()
 
-        if current_status == "BUFFER_IN":
+        if current_status in ("BUFFER_IN", "UNUSED_RETURN"):
             if not engineer_name:
                 return Response({"engineer_name": ["This field is required."]}, status=status.HTTP_400_BAD_REQUEST)
             if not case_id:
