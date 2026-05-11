@@ -180,6 +180,7 @@ class BufferPart(models.Model):
             ("BUFFER_IN", "BUFFER In"),
             ("OUT", "Out"),
             ("DEFECTIVE_RETURN", "Defective Return"),
+            ("UNUSED_RETURN", "Unused Return"),
             ("REORDER", "Reorder"),
             ("PART_RECEIVED", "Part Received"),
             ("CLOSED", "Closed"),
