@@ -418,6 +418,10 @@ class DelayRecordSerializer(serializers.ModelSerializer):
 class TicketCreateSerializer(serializers.ModelSerializer):
     """Used by CSO to create a new ticket."""
 
+    entry_charge = serializers.DecimalField(
+        max_digits=12, decimal_places=2, required=False, allow_null=True, write_only=True,
+    )
+
     class Meta:
         model = Ticket
         fields = [
@@ -461,6 +465,8 @@ class TicketCreateSerializer(serializers.ModelSerializer):
             "target_completion",
             # Region (may be set automatically)
             "region",
+            # Virtual
+            "entry_charge",
         ]
 
 
@@ -552,6 +558,7 @@ class AvailableTransitionSerializer(serializers.Serializer):
 class ActivityChargeSerializer(serializers.ModelSerializer):
     created_by_detail = serializers.SerializerMethodField(read_only=True)
     region_display = serializers.CharField(source="get_region_display", read_only=True)
+    ticket_number = serializers.CharField(source="ticket.ticket_number", read_only=True)
 
     class Meta:
         model = ActivityCharge
@@ -559,6 +566,8 @@ class ActivityChargeSerializer(serializers.ModelSerializer):
             "id",
             "region",
             "region_display",
+            "ticket",
+            "ticket_number",
             "activity_name",
             "amount",
             "remarks",
