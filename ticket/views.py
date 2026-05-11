@@ -210,6 +210,8 @@ class TicketListCreateView(APIView):
         if not serializer.is_valid():
             return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
+        entry_charge = serializer.validated_data.pop("entry_charge", None)
+
         user = request.user
         profile = getattr(user, "userprofile", None)
         region = serializer.validated_data.get("region") or (
@@ -221,6 +223,17 @@ class TicketListCreateView(APIView):
             region=region,
             current_status="cso_created",
         )
+
+        # If entry charge provided, create automated activity charge record
+        if entry_charge and entry_charge > 0:
+            ActivityCharge.objects.create(
+                ticket=ticket,
+                region=region or "vellore",
+                activity_name=f"CSO Entry Charge",
+                amount=entry_charge,
+                created_by=user,
+                remarks=f"Automated entry charge logged during creation of ticket {ticket.ticket_number}."
+            )
 
         # Create initial timeline entry
         sla_config = lookup_sla("cso_created", ticket.service_type, ticket.priority)
@@ -495,6 +508,8 @@ class VerifyOTPAndSubmitView(APIView):
         if not serializer.is_valid():
             return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
+        entry_charge = serializer.validated_data.pop("entry_charge", None)
+
         user = request.user
         profile = getattr(user, "userprofile", None)
         region = form_data.get("region") or (profile.region if profile else None)
@@ -504,6 +519,17 @@ class VerifyOTPAndSubmitView(APIView):
             region=region,
             current_status="cso_created",
         )
+
+        # If entry charge provided, create automated activity charge record
+        if entry_charge and entry_charge > 0:
+            ActivityCharge.objects.create(
+                ticket=ticket,
+                region=region or "vellore",
+                activity_name=f"CSO Entry Charge",
+                amount=entry_charge,
+                created_by=user,
+                remarks=f"Automated entry charge logged during creation of ticket {ticket.ticket_number}."
+            )
 
         # Create initial timeline entry
         sla_config = lookup_sla("cso_created", ticket.service_type, ticket.priority)
