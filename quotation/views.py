@@ -37,7 +37,23 @@ class QuotationListCreateView(APIView):
     permission_classes = [permissions.IsAuthenticated]
 
     def get(self, request):
-        qs = Quotation.objects.select_related('prepared_by', 'ticket').prefetch_related('items').all()
+        user = request.user
+        profile = getattr(user, "userprofile", None)
+        role = profile.role if profile else "admin"
+        
+        # Only 'super_admin' and 'admin' can see all data across regions
+        is_global_admin = role in ('super_admin', 'admin')
+
+        qs = Quotation.objects.select_related('prepared_by', 'ticket').prefetch_related('items')
+        
+        if not is_global_admin:
+            if profile and profile.region:
+                qs = qs.filter(ticket__region=profile.region)
+            else:
+                # Fallback: at least ensure only what they created is seen if orphan profile
+                qs = qs.filter(prepared_by=user)
+        
+        qs = qs.all()
 
         ticket_id = request.query_params.get('ticket_id')
         if ticket_id:
@@ -46,6 +62,11 @@ class QuotationListCreateView(APIView):
         status_filter = request.query_params.get('status')
         if status_filter:
             qs = qs.filter(status=status_filter)
+
+        region_filter = request.query_params.get('region')
+        # Only allow region override if global admin
+        if region_filter and is_global_admin:
+            qs = qs.filter(ticket__region=region_filter)
 
         page_qs, meta = paginate_queryset(qs, request)
         serializer = QuotationSerializer(page_qs, many=True)
@@ -144,3 +165,44 @@ class CustomerResponseView(APIView):
 
         serializer = QuotationSerializer(obj)
         return Response(serializer.data)
+
+
+class QuotationSummaryView(APIView):
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get(self, request):
+        from django.db.models import Count
+        from authenticate.models import UserProfile
+
+        user = request.user
+        profile = getattr(user, "userprofile", None)
+        role = profile.role if profile else "admin"
+        
+        is_global_admin = role in ('super_admin', 'admin')
+        
+        qs = Quotation.objects.all()
+        if not is_global_admin:
+            if profile and profile.region:
+                qs = qs.filter(ticket__region=profile.region)
+
+        region_list = []
+        
+        # Define subset to iterate: if not admin, ONLY iterate their own region
+        choices_to_check = UserProfile.REGION_CHOICES
+        if not is_global_admin and profile and profile.region:
+             # only keep their region
+             choices_to_check = [c for c in UserProfile.REGION_CHOICES if c[0] == profile.region]
+
+        for code, label in choices_to_check:
+            count = qs.filter(ticket__region=code).count()
+            region_list.append({
+                'region': code,
+                'total': count
+            })
+        
+        grand_total = qs.count()
+
+        return Response({
+            'regions': region_list,
+            'total': grand_total,
+        })
