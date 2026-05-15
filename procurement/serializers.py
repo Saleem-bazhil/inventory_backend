@@ -144,15 +144,17 @@ class BufferStockSerializer(serializers.ModelSerializer):
 class BufferPartSerializer(serializers.ModelSerializer):
     created_by_name = serializers.SerializerMethodField()
     region_display = serializers.SerializerMethodField()
+    usage_count = serializers.SerializerMethodField()
 
     class Meta:
         model = BufferPart
         fields = [
             "id", "part_number", "part_name", "quantity", "general_name",
-            "region", "region_display", "status", "engineer_name", "case_id", "transition_history",
+            "region", "region_display", "status", "engineer_name", "case_id", 
+            "transition_history", "usage_count",
             "created_by", "created_by_name", "created_at",
         ]
-        read_only_fields = ["id", "created_by", "created_at", "region_display"]
+        read_only_fields = ["id", "created_by", "created_at", "region_display", "usage_count"]
 
     def get_created_by_name(self, obj):
         if obj.created_by:
@@ -163,3 +165,9 @@ class BufferPartSerializer(serializers.ModelSerializer):
     def get_region_display(self, obj):
         from authenticate.models import UserProfile
         return dict(UserProfile.REGION_CHOICES).get(obj.region, "")
+
+    def get_usage_count(self, obj):
+        if not obj.transition_history:
+            return 0
+        # Count number of times this part went OUT to an engineer
+        return sum(1 for entry in obj.transition_history if entry.get("to_status") == "OUT")
