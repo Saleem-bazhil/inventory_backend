@@ -153,6 +153,12 @@ class TicketListCreateView(APIView):
         if filter_status:
             qs = qs.filter(current_status=filter_status)
 
+        is_closed_param = params.get("is_closed", "").strip().lower()
+        if is_closed_param == "true":
+            qs = qs.filter(current_status="closed")
+        elif is_closed_param == "false":
+            qs = qs.exclude(current_status="closed")
+
         filter_priority = params.get("priority", "").strip()
         if filter_priority:
             qs = qs.filter(priority=filter_priority)
