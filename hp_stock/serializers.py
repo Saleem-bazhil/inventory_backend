@@ -7,7 +7,7 @@ class HPStockItemSerializer(serializers.ModelSerializer):
     class Meta:
         model = HPStockItem
         fields = '__all__'
-        read_only_fields = ('created_by', 'created_at', 'updated_at')
+        read_only_fields = ('created_by', 'created_at', 'updated_at', 'transition_history')
 
     def create(self, validated_data):
         request = self.context.get('request')

@@ -3,6 +3,7 @@ from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.decorators import action
 from django.db.models import Count, Q
+from django.utils import timezone
 from .models import HPStockItem
 from .serializers import HPStockItemSerializer
 
@@ -106,3 +107,76 @@ class HPStockItemViewSet(viewsets.ModelViewSet):
             serializer.save(region=user_region)
         else:
             serializer.save()
+
+    @action(detail=True, methods=['post'])
+    def transition(self, request, pk=None):
+        obj = self.get_object()
+        user = request.user
+        profile = getattr(user, "userprofile", None)
+        role = profile.role if profile else ''
+        
+        # Region scoping: non-admins can only transition items in their own region
+        if role not in ['admin', 'super_admin', 'manager']:
+            user_region = profile.region if profile else ''
+            if obj.region != user_region:
+                return Response(
+                    {"detail": "You can only transition HP stock items in your own region."},
+                    status=403,
+                )
+
+        current_status = obj.status or "PENDING"
+        
+        HP_STOCK_TRANSITIONS = {
+            "PENDING": ["RECEIVED"],
+            "RECEIVED": ["ISSUED"],
+            "ISSUED": ["UNUSED_RETURN", "DEFECTIVE_RETURN"],
+            "UNUSED_RETURN": ["CLOSED"],
+            "DEFECTIVE_RETURN": ["CLOSED"],
+        }
+        
+        requested_to_status = request.data.get("to_status")
+        if requested_to_status:
+            next_status = requested_to_status
+        else:
+            transitions = HP_STOCK_TRANSITIONS.get(current_status, [])
+            next_status = transitions[0] if transitions else None
+
+        if not next_status:
+            return Response(
+                {"detail": "No transition available for current status."},
+                status=400,
+            )
+
+        engineer_name = (request.data.get("engineer_name") or "").strip()
+        remarks = (request.data.get("remarks") or "").strip()
+
+        # Update engineer if passed
+        if engineer_name:
+            obj.engineer_name = engineer_name
+
+        history = list(obj.transition_history or [])
+        actor_name = f"{user.first_name} {user.last_name}".strip() or user.username
+        
+        entry = {
+            "from_status": current_status,
+            "to_status": next_status,
+            "comment": remarks,
+            "updated_by": actor_name,
+            "timestamp": timezone.now().isoformat(),
+        }
+        
+        if engineer_name:
+            entry["engineer_name"] = engineer_name
+
+        history.append(entry)
+        obj.status = next_status
+        obj.transition_history = history
+        
+        # Save modifications
+        save_fields = ["status", "transition_history"]
+        if engineer_name:
+            save_fields.append("engineer_name")
+            
+        obj.save(update_fields=save_fields)
+
+        return Response(HPStockItemSerializer(obj).data)
