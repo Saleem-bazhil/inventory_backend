@@ -14,6 +14,7 @@ urlpatterns = [
     path('api/', include('procurement.urls')),
     path('api/', include('buffer_stock.urls')),
     path('api/', include('invoice.urls')),
+    path('api/hp-stock/', include('hp_stock.urls')),
     path('api/auth/', include('authenticate.urls')),
     path('api/users/engineers/', EngineersListView.as_view(), name='engineers-list'),
 ]
