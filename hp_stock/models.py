@@ -17,13 +17,15 @@ class HPStockItem(models.Model):
             ("PENDING", "Pending"),
             ("RECEIVED", "Received"),
             ("ISSUED", "Issued"),
-            ("RETURNED", "Returned"),
+            ("UNUSED_RETURN", "Unused Return"),
+            ("DEFECTIVE_RETURN", "Defective Return"),
             ("CLOSED", "Closed"),
         ],
         default="PENDING",
         verbose_name="Status",
     )
     engineer_name = models.CharField(max_length=255, blank=True, default="", verbose_name="Engineer Name")
+    transition_history = models.JSONField(default=list, blank=True, verbose_name="Transition History")
     created_by = models.ForeignKey(
         User, on_delete=models.SET_NULL, null=True, blank=True,
         related_name="hp_stock_items",
