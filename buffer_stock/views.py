@@ -993,6 +993,10 @@ class AuditLogListView(APIView):
         if region:
             qs = qs.filter(region=region)
 
+        entity_id = request.query_params.get("entity_id")
+        if entity_id:
+            qs = qs.filter(entity_id=entity_id)
+
         page_qs, meta = paginate_queryset(qs, request)
         serializer = BufferAuditLogSerializer(page_qs, many=True)
         return Response({"items": serializer.data, **meta})
