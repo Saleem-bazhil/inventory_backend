@@ -127,11 +127,13 @@ class HPStockItemViewSet(viewsets.ModelViewSet):
         current_status = obj.status or "PENDING"
         
         HP_STOCK_TRANSITIONS = {
-            "PENDING": ["RECEIVED"],
-            "RECEIVED": ["ISSUED"],
-            "ISSUED": ["UNUSED_RETURN", "DEFECTIVE_RETURN"],
-            "UNUSED_RETURN": ["CLOSED"],
-            "DEFECTIVE_RETURN": ["CLOSED"],
+            "PENDING": ["STOCK_CHECK"],
+            "STOCK_CHECK": ["ISSUED"],
+            "ISSUED": ["WORK_STATUS"],
+            "WORK_STATUS": ["UNUSED_RETURN", "DEFECTIVE_RETURN"],
+            "UNUSED_RETURN": ["HANDOVER"],
+            "DEFECTIVE_RETURN": ["HANDOVER"],
+            "HANDOVER": ["CLOSED"],
         }
         
         requested_to_status = request.data.get("to_status")
