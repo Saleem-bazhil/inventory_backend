@@ -9,6 +9,11 @@ from .serializers import HPStockItemSerializer
 
 from rest_framework.pagination import PageNumberPagination
 import math
+import re
+import random
+import urllib.parse
+from datetime import timedelta
+from material.models import OTPVerification
 
 class CustomPageNumberPagination(PageNumberPagination):
     page_size = 20
@@ -26,6 +31,34 @@ class CustomPageNumberPagination(PageNumberPagination):
             'per_page': per_page,
             'pages': pages
         })
+
+def _clean_phone(phone: str) -> str:
+    """Strip non-digits and remove leading +91 or 91 to get 10-digit Indian number."""
+    digits = re.sub(r"\D", "", phone)
+    if len(digits) == 12 and digits.startswith("91"):
+        digits = digits[2:]
+    elif len(digits) == 13 and digits.startswith("091"):
+        digits = digits[3:]
+    return digits
+
+def verify_otp_local(phone: str, otp: str) -> bool:
+    """Verify OTP for a given phone number using the database."""
+    phone = _clean_phone(phone)
+    # Clean up expired OTPs
+    OTPVerification.objects.filter(expires_at__lt=timezone.now()).delete()
+
+    entry = OTPVerification.objects.filter(phone=phone).first()
+    if not entry:
+        return False
+    if timezone.now() > entry.expires_at:
+        entry.delete()
+        return False
+    if entry.otp != otp:
+        return False
+
+    # OTP verified — remove it so it can't be reused
+    entry.delete()
+    return True
 
 class HPStockItemViewSet(viewsets.ModelViewSet):
     queryset = HPStockItem.objects.all()
@@ -152,6 +185,25 @@ class HPStockItemViewSet(viewsets.ModelViewSet):
         engineer_name = (request.data.get("engineer_name") or "").strip()
         remarks = (request.data.get("remarks") or "").strip()
 
+        # OTP Verification for ISSUED or HANDOVER
+        if next_status in ["ISSUED", "HANDOVER"]:
+            engineer_phone = (request.data.get("engineer_phone") or "").strip()
+            otp = (request.data.get("otp") or "").strip()
+            
+            if not engineer_name:
+                return Response({"detail": "Engineer Name is required for this transition."}, status=400)
+            if not engineer_phone:
+                return Response({"detail": "Engineer Phone Number is required for OTP verification."}, status=400)
+            if not otp:
+                return Response({"detail": "Verification OTP is required."}, status=400)
+                
+            # Verify OTP
+            cleaned = _clean_phone(engineer_phone)
+            if not verify_otp_local(cleaned, otp):
+                return Response({"detail": "Invalid or expired OTP. Please try again."}, status=400)
+                
+            obj.engineer_phone = engineer_phone
+
         # Update engineer if passed
         if engineer_name:
             obj.engineer_name = engineer_name
@@ -169,6 +221,8 @@ class HPStockItemViewSet(viewsets.ModelViewSet):
         
         if engineer_name:
             entry["engineer_name"] = engineer_name
+        if next_status in ["ISSUED", "HANDOVER"] and getattr(obj, "engineer_phone", None):
+            entry["engineer_phone"] = obj.engineer_phone
 
         history.append(entry)
         obj.status = next_status
@@ -178,7 +232,46 @@ class HPStockItemViewSet(viewsets.ModelViewSet):
         save_fields = ["status", "transition_history"]
         if engineer_name:
             save_fields.append("engineer_name")
+        if next_status in ["ISSUED", "HANDOVER"] and getattr(obj, "engineer_phone", None):
+            save_fields.append("engineer_phone")
             
         obj.save(update_fields=save_fields)
 
         return Response(HPStockItemSerializer(obj).data)
+
+    @action(detail=True, methods=['post'])
+    def send_otp(self, request, pk=None):
+        obj = self.get_object()
+        phone = (request.data.get("phone") or "").strip()
+        target_status = (request.data.get("to_status") or "").strip()
+        
+        if not phone:
+            return Response({"detail": "Phone number is required."}, status=400)
+            
+        cleaned = _clean_phone(phone)
+        if len(cleaned) != 10:
+            return Response({"detail": "Invalid phone number. Must be a 10-digit Indian mobile number (e.g. 9876543210)."}, status=400)
+            
+        # Generate 6-digit OTP
+        otp = str(random.randint(100000, 999999))
+        
+        # Remove any existing OTPs for this phone, then store the new one
+        OTPVerification.objects.filter(phone=cleaned).delete()
+        OTPVerification.objects.create(
+            phone=cleaned,
+            otp=otp,
+            expires_at=timezone.now() + timedelta(minutes=5)
+        )
+        
+        # Prepare message
+        status_label = "Part Taken" if target_status == "ISSUED" else "Handover"
+        message = f"Your OTP for HP Stock {status_label} (Case: {obj.case_id}) is {otp}. Valid for 5 minutes. Do not share."
+        
+        # Prefilled WhatsApp URL
+        whatsapp_url = f"https://wa.me/91{cleaned}?text={urllib.parse.quote(message)}"
+        
+        return Response({
+            "otp": otp,  # Return it so frontend can display or prefill for testing/fallback
+            "whatsapp_url": whatsapp_url,
+            "detail": f"OTP {otp} generated successfully. Please send it to the engineer via WhatsApp."
+        })
