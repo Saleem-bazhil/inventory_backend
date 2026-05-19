@@ -27,6 +27,7 @@ class HPStockItem(models.Model):
         verbose_name="Status",
     )
     engineer_name = models.CharField(max_length=255, blank=True, default="", verbose_name="Engineer Name")
+    engineer_phone = models.CharField(max_length=20, blank=True, default="", verbose_name="Engineer Phone")
     transition_history = models.JSONField(default=list, blank=True, verbose_name="Transition History")
     created_by = models.ForeignKey(
         User, on_delete=models.SET_NULL, null=True, blank=True,
