@@ -82,6 +82,7 @@ class HPStockItemViewSet(viewsets.ModelViewSet):
         view_mode = self.request.query_params.get('view', '')
         search = self.request.query_params.get('search', '')
         region = self.request.query_params.get('region', '')
+        is_closed_param = self.request.query_params.get('is_closed', '').strip().lower()
 
         if region and region != 'all':
             # Non-admins should not be able to bypass their region check
@@ -94,6 +95,11 @@ class HPStockItemViewSet(viewsets.ModelViewSet):
             user_region = profile.region if profile else ''
             if user_region:
                 queryset = queryset.filter(region=user_region)
+
+        if is_closed_param == 'true':
+            queryset = queryset.filter(status='CLOSED')
+        elif is_closed_param == 'false':
+            queryset = queryset.exclude(status='CLOSED')
 
         if search:
             queryset = queryset.filter(
@@ -113,10 +119,18 @@ class HPStockItemViewSet(viewsets.ModelViewSet):
     def summary(self, request):
         queryset = self.get_queryset()
         total = queryset.count()
-        regions = queryset.values('region').annotate(total=Count('id')).order_by('-total')
+        active_total = queryset.exclude(status='CLOSED').count()
+        closed_total = queryset.filter(status='CLOSED').count()
+        regions = queryset.values('region').annotate(
+            total=Count('id'),
+            active=Count('id', filter=~Q(status='CLOSED')),
+            closed=Count('id', filter=Q(status='CLOSED'))
+        ).order_by('-total')
         return Response({
             'total': total,
-            'regions': regions
+            'active_total': active_total,
+            'closed_total': closed_total,
+            'regions': list(regions)
         })
 
     def perform_create(self, serializer):
