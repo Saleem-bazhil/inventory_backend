@@ -6,6 +6,7 @@ from .views import (
     PartRequestListCreateView,
     PartRequestRejectView,
     PendingPartRequestsView,
+    PartRequestMessageView,
 )
 
 urlpatterns = [
@@ -14,4 +15,6 @@ urlpatterns = [
     path('part-requests/<int:pk>/', PartRequestDetailView.as_view(), name='part-request-detail'),
     path('part-requests/<int:pk>/approve/', PartRequestApproveView.as_view(), name='part-request-approve'),
     path('part-requests/<int:pk>/reject/', PartRequestRejectView.as_view(), name='part-request-reject'),
+    path('part-requests/<int:pk>/messages/', PartRequestMessageView.as_view(), name='part-request-messages'),
 ]
+
