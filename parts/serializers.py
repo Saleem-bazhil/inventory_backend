@@ -1,6 +1,6 @@
 from rest_framework import serializers
 
-from .models import PartRequest
+from .models import PartRequest, PartRequestMessage
 from ticket.models import Ticket
 from ticket.serializers import TicketPartRequestImageSerializer
 
@@ -59,6 +59,15 @@ class PartRequestTicketSerializer(serializers.ModelSerializer):
         ]
 
 
+class PartRequestMessageSerializer(serializers.ModelSerializer):
+    sender = UserMiniSerializer(read_only=True)
+    created_at = serializers.DateTimeField(format="%Y-%m-%dT%H:%M:%S.%fZ", read_only=True)
+
+    class Meta:
+        model = PartRequestMessage
+        fields = ['id', 'sender', 'message', 'created_at']
+
+
 class PartRequestSerializer(serializers.ModelSerializer):
     requested_by = UserMiniSerializer(read_only=True)
     approved_by = UserMiniSerializer(read_only=True)
@@ -68,6 +77,7 @@ class PartRequestSerializer(serializers.ModelSerializer):
     urgency_display = serializers.CharField(source='get_urgency_display', read_only=True)
     status_display = serializers.CharField(source='get_status_display', read_only=True)
     ticket_details = PartRequestTicketSerializer(source='ticket', read_only=True)
+    messages = PartRequestMessageSerializer(many=True, read_only=True)
 
     class Meta:
         model = PartRequest
@@ -80,7 +90,7 @@ class PartRequestSerializer(serializers.ModelSerializer):
             'approved_by',
             'approved_at', 'rejection_reason',
             'received_at', 'created_at', 'updated_at',
-            'ticket_details',
+            'ticket_details', 'messages',
         ]
         read_only_fields = [
             'id', 'requested_by', 'approved_by', 'approved_at',
