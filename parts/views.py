@@ -6,8 +6,8 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from authenticate.models import UserProfile
-from .models import PartRequest
-from .serializers import PartRequestSerializer
+from .models import PartRequest, PartRequestMessage
+from .serializers import PartRequestSerializer, PartRequestMessageSerializer
 
 
 # Roles allowed to approve / reject part requests
@@ -225,3 +225,28 @@ class PendingPartRequestsView(APIView):
             'items': serializer.data,
             **meta,
         })
+
+
+class PartRequestMessageView(APIView):
+    permission_classes = [permissions.IsAuthenticated]
+
+    def post(self, request, pk):
+        try:
+            part_request = PartRequest.objects.get(pk=pk)
+        except PartRequest.DoesNotExist:
+            return Response({'detail': 'Not found.'}, status=status.HTTP_404_NOT_FOUND)
+
+        message_text = request.data.get('message', '').strip()
+        if not message_text:
+            return Response({'detail': 'Message text is required.'}, status=status.HTTP_400_BAD_REQUEST)
+
+        # Create message
+        msg = PartRequestMessage.objects.create(
+            part_request=part_request,
+            sender=request.user,
+            message=message_text
+        )
+
+        serializer = PartRequestMessageSerializer(msg, context={'request': request})
+        return Response(serializer.data, status=status.HTTP_201_CREATED)
+
