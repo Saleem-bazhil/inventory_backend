@@ -1,5 +1,7 @@
 from django.contrib import admin
 from django.urls import path, include
+from django.conf import settings
+from django.conf.urls.static import static
 
 from authenticate.views import EngineersListView
 
@@ -18,3 +20,7 @@ urlpatterns = [
     path('api/auth/', include('authenticate.urls')),
     path('api/users/engineers/', EngineersListView.as_view(), name='engineers-list'),
 ]
+
+if settings.DEBUG:
+    urlpatterns += static(settings.MEDIA_URL, document_root=settings.MEDIA_ROOT)
+
