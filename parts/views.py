@@ -85,14 +85,14 @@ class PartRequestListCreateView(APIView):
             qs = qs.filter(ticket__region=region_filter)
 
         page_qs, meta = paginate_queryset(qs, request)
-        serializer = PartRequestSerializer(page_qs, many=True)
+        serializer = PartRequestSerializer(page_qs, many=True, context={'request': request})
         return Response({
             'items': serializer.data,
             **meta,
         })
 
     def post(self, request):
-        serializer = PartRequestSerializer(data=request.data)
+        serializer = PartRequestSerializer(data=request.data, context={'request': request})
         if serializer.is_valid():
             serializer.save(requested_by=request.user)
             return Response(serializer.data, status=status.HTTP_201_CREATED)
@@ -114,14 +114,14 @@ class PartRequestDetailView(APIView):
         obj = self._get_object(pk)
         if not obj:
             return Response({'detail': 'Not found.'}, status=status.HTTP_404_NOT_FOUND)
-        serializer = PartRequestSerializer(obj)
+        serializer = PartRequestSerializer(obj, context={'request': request})
         return Response(serializer.data)
 
     def put(self, request, pk):
         obj = self._get_object(pk)
         if not obj:
             return Response({'detail': 'Not found.'}, status=status.HTTP_404_NOT_FOUND)
-        serializer = PartRequestSerializer(obj, data=request.data, partial=True)
+        serializer = PartRequestSerializer(obj, data=request.data, partial=True, context={'request': request})
         if serializer.is_valid():
             serializer.save()
             return Response(serializer.data)
@@ -154,7 +154,7 @@ class PartRequestApproveView(APIView):
         obj.approved_at = timezone.now()
         obj.save()
 
-        serializer = PartRequestSerializer(obj)
+        serializer = PartRequestSerializer(obj, context={'request': request})
         return Response(serializer.data)
 
 
@@ -192,7 +192,7 @@ class PartRequestRejectView(APIView):
         obj.rejection_reason = rejection_reason
         obj.save()
 
-        serializer = PartRequestSerializer(obj)
+        serializer = PartRequestSerializer(obj, context={'request': request})
         return Response(serializer.data)
 
 
@@ -220,7 +220,7 @@ class PendingPartRequestsView(APIView):
             qs = qs.filter(ticket__region=region_filter)
 
         page_qs, meta = paginate_queryset(qs, request)
-        serializer = PartRequestSerializer(page_qs, many=True)
+        serializer = PartRequestSerializer(page_qs, many=True, context={'request': request})
         return Response({
             'items': serializer.data,
             **meta,

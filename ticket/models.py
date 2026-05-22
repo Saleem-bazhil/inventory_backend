@@ -204,6 +204,8 @@ class Ticket(models.Model):
 
     # --- Dates ---
     cso_date = models.DateField(verbose_name="CSO Date", blank=True, null=True)
+    cso_image = models.FileField(upload_to="cso_images/", blank=True, null=True, verbose_name="CSO Image")
+    part_request_image = models.FileField(upload_to="part_request_images/", blank=True, null=True, verbose_name="Part Request Image")
     arrival_date = models.DateField(verbose_name="Arrival Date", blank=True, null=True)
     target_completion = models.DateField(verbose_name="Target Completion", blank=True, null=True)
     closed_at = models.DateTimeField(null=True, blank=True, verbose_name="Closed At")
@@ -241,6 +243,20 @@ class Ticket(models.Model):
             Ticket.objects.filter(pk=self.pk).update(**update_fields)
         else:
             super().save(*args, **kwargs)
+
+
+class TicketPartRequestImage(models.Model):
+    ticket = models.ForeignKey(Ticket, on_delete=models.CASCADE, related_name="part_request_images")
+    image = models.FileField(upload_to="part_request_images/", verbose_name="Part Request Image")
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        verbose_name = "Ticket Part Request Image"
+        verbose_name_plural = "Ticket Part Request Images"
+        ordering = ["created_at"]
+
+    def __str__(self):
+        return f"{self.ticket.ticket_number} - Image {self.pk}"
 
 
 class TicketTimeline(models.Model):

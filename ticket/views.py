@@ -13,7 +13,7 @@ from authenticate.models import Engineer, UserProfile
 # OTP disabled — uncomment when SMS provider is available
 # from material.sms import send_otp_sms, verify_otp
 
-from .models import ActivityCharge, DelayRecord, Ticket, TicketTimeline
+from .models import ActivityCharge, DelayRecord, Ticket, TicketTimeline, TicketPartRequestImage
 from .serializers import (
     ActivityChargeSerializer,
     AvailableTransitionSerializer,
@@ -304,6 +304,26 @@ class TicketDetailView(APIView):
                 {"detail": "Ticket not found."},
                 status=status.HTTP_404_NOT_FOUND,
             )
+
+        # Handle multiple part request image uploads if provided in FILES
+        part_request_files = request.FILES.getlist("part_request_images")
+        if part_request_files:
+            for file in part_request_files:
+                TicketPartRequestImage.objects.create(ticket=ticket, image=file)
+
+        # Handle deleting specific part request images if list of IDs provided
+        delete_ids = request.data.get("delete_part_request_images")
+        if delete_ids:
+            try:
+                import json
+                if isinstance(delete_ids, str):
+                    delete_ids = json.loads(delete_ids)
+                if isinstance(delete_ids, list):
+                    # Filter and delete the specified image rows associated with this ticket
+                    TicketPartRequestImage.objects.filter(ticket=ticket, id__in=delete_ids).delete()
+            except Exception as e:
+                logger.error(f"Error deleting part request images: {e}")
+
         serializer = TicketUpdateSerializer(ticket, data=request.data, partial=True)
         if not serializer.is_valid():
             return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)

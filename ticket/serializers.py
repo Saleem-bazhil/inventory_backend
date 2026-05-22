@@ -4,7 +4,7 @@ from django.utils import timezone
 from rest_framework import serializers
 
 from authenticate.models import Engineer
-from .models import ActivityCharge, DelayRecord, Ticket, TicketTimeline
+from .models import ActivityCharge, DelayRecord, Ticket, TicketTimeline, TicketPartRequestImage
 from .utils import get_sla_start_time
 
 
@@ -69,11 +69,18 @@ class TimelineEntrySerializer(serializers.ModelSerializer):
         return _user_summary(obj.actor)
 
 
+class TicketPartRequestImageSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = TicketPartRequestImage
+        fields = ["id", "image", "created_at"]
+
+
 # ---------------------------------------------------------------------------
 # Ticket — List (lightweight)
 # ---------------------------------------------------------------------------
 
 class TicketListSerializer(serializers.ModelSerializer):
+    part_request_images = TicketPartRequestImageSerializer(many=True, read_only=True)
     # Computed / annotated fields
     sla_health = serializers.SerializerMethodField()
     sla_remaining_mins = serializers.SerializerMethodField()
@@ -128,6 +135,9 @@ class TicketListSerializer(serializers.ModelSerializer):
             "target_completion",
             "closed_at",
             "cso_date",
+            "cso_image",
+            "part_request_image",
+            "part_request_images",
             "created_at",
             "updated_at",
             # Computed
@@ -214,6 +224,7 @@ class TicketListSerializer(serializers.ModelSerializer):
 class TicketDetailSerializer(serializers.ModelSerializer):
     timeline = serializers.SerializerMethodField()
     delay_records = serializers.SerializerMethodField()
+    part_request_images = TicketPartRequestImageSerializer(many=True, read_only=True)
     current_assignee = serializers.SerializerMethodField()
     created_by = serializers.SerializerMethodField()
     assigned_engineer = serializers.SerializerMethodField()
@@ -297,6 +308,9 @@ class TicketDetailSerializer(serializers.ModelSerializer):
             "otp_verified_at",
             # Dates
             "cso_date",
+            "cso_image",
+            "part_request_image",
+            "part_request_images",
             "arrival_date",
             "target_completion",
             "closed_at",
@@ -461,6 +475,8 @@ class TicketCreateSerializer(serializers.ModelSerializer):
             "customer_comments",
             # Dates
             "cso_date",
+            "cso_image",
+            "part_request_image",
             "arrival_date",
             "target_completion",
             # Region (may be set automatically)
@@ -517,6 +533,8 @@ class TicketUpdateSerializer(serializers.ModelSerializer):
             "customer_comments",
             # Dates
             "cso_date",
+            "cso_image",
+            "part_request_image",
             "arrival_date",
             "target_completion",
             # Region
