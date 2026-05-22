@@ -49,3 +49,23 @@ class PartRequest(models.Model):
 
     def __str__(self):
         return f"{self.part_number} - {self.part_name} ({self.get_status_display()})"
+
+
+class PartRequestMessage(models.Model):
+    part_request = models.ForeignKey(
+        PartRequest, on_delete=models.CASCADE, related_name='messages',
+    )
+    sender = models.ForeignKey(
+        User, on_delete=models.CASCADE, related_name='part_request_messages_sent',
+    )
+    message = models.TextField()
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ['created_at']
+        verbose_name = 'Part Request Message'
+        verbose_name_plural = 'Part Request Messages'
+
+    def __str__(self):
+        return f"{self.sender.username} on PartRequest {self.part_request.id} - {self.created_at}"
+
