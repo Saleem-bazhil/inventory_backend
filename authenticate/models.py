@@ -45,6 +45,10 @@ class UserProfile(models.Model):
         max_length=20, choices=REGION_CHOICES, blank=True, null=True,
         help_text="Required for non-admin roles.",
     )
+    allowed_sections = models.JSONField(
+        default=list, blank=True,
+        help_text="Allowed section paths or labels for managers.",
+    )
 
     def __str__(self):
         return f"{self.user.username} ({self.get_role_display()})"
