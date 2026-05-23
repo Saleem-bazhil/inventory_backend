@@ -580,9 +580,17 @@ class BufferPartListCreateView(APIView):
         region_filter = request.query_params.get("region", "").strip()
 
         if region_filter:
-            qs = qs.filter(region=region_filter)
+            if region_filter == "unassigned":
+                qs = qs.filter(Q(region="") | Q(region__isnull=True))
+            else:
+                qs = qs.filter(region=region_filter)
         elif view_mode == "my_region" and user_region:
             qs = qs.filter(region=user_region)
+        status_type = request.query_params.get("status_type", "").strip()
+        if status_type == "unused":
+            qs = qs.filter(status__in=["BUFFER_IN", "UNUSED_RETURN", "PART_RECEIVED"])
+        elif status_type == "used":
+            qs = qs.filter(status__in=["OUT", "DEFECTIVE_RETURN", "CLOSED", "REORDER"])
         # view_mode == "overall" or unset: no region filter — everyone sees all
 
         search = request.query_params.get("search", "").strip()
@@ -760,14 +768,13 @@ class BufferPartSummaryView(APIView):
         view_mode = request.query_params.get("view", "").strip()
         region_filter = request.query_params.get("region", "").strip()
 
-        if region_filter:
-            qs = qs.filter(region=region_filter)
-        elif view_mode == "my_region" and user_region:
-            qs = qs.filter(region=user_region)
-        # view_mode == "overall" or unset: no region filter
+        # Scoping for region cards list
+        qs_regions = qs
+        if view_mode == "my_region" and user_region:
+            qs_regions = qs_regions.filter(region=user_region)
 
         regions = (
-            qs.values("region")
+            qs_regions.values("region")
             .annotate(total=Sum("quantity"))
             .order_by("region")
         )
@@ -776,7 +783,17 @@ class BufferPartSummaryView(APIView):
             {"region": r["region"] or "unassigned", "total": r["total"] or 0}
             for r in regions
         ]
-        grand_total = sum(r["total"] for r in region_list)
+
+        # Scoping for Totals, Used, and Unused counts
+        if region_filter:
+            if region_filter == "unassigned":
+                qs = qs.filter(Q(region="") | Q(region__isnull=True))
+            else:
+                qs = qs.filter(region=region_filter)
+        elif view_mode == "my_region" and user_region:
+            qs = qs.filter(region=user_region)
+
+        grand_total = sum(r["total"] for r in region_list) if not region_filter else (qs.aggregate(total=Sum("quantity"))["total"] or 0)
 
         unused_total = qs.filter(status__in=["BUFFER_IN", "UNUSED_RETURN", "PART_RECEIVED"]).aggregate(total=Sum("quantity"))["total"] or 0
         used_total = qs.filter(status__in=["OUT", "DEFECTIVE_RETURN", "CLOSED", "REORDER"]).aggregate(total=Sum("quantity"))["total"] or 0
