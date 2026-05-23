@@ -778,8 +778,13 @@ class BufferPartSummaryView(APIView):
         ]
         grand_total = sum(r["total"] for r in region_list)
 
+        unused_total = qs.filter(status__in=["BUFFER_IN", "UNUSED_RETURN", "PART_RECEIVED"]).aggregate(total=Sum("quantity"))["total"] or 0
+        used_total = qs.filter(status__in=["OUT", "DEFECTIVE_RETURN", "CLOSED", "REORDER"]).aggregate(total=Sum("quantity"))["total"] or 0
+
         return Response({
             "regions": region_list,
             "total": grand_total,
+            "used": used_total,
+            "unused": unused_total,
         })
 
