@@ -281,6 +281,7 @@ class ManagerListCreateView(APIView):
                 "region": u.userprofile.region,
                 "region_display": u.userprofile.get_region_display() if u.userprofile.region else "",
                 "is_active": u.is_active,
+                "allowed_sections": u.userprofile.allowed_sections,
             }
             for u in users
         ]
@@ -301,6 +302,7 @@ class ManagerListCreateView(APIView):
                 "region": profile.region,
                 "region_display": profile.get_region_display() if profile.region else "",
                 "is_active": user.is_active,
+                "allowed_sections": profile.allowed_sections,
             },
             status=status.HTTP_201_CREATED,
         )
@@ -334,9 +336,18 @@ class ManagerDetailView(APIView):
         if "password" in d:
             user.set_password(d["password"])
         user.save()
+        
+        update_fields = []
         if "region" in d:
             user.userprofile.region = d["region"] or None
-            user.userprofile.save(update_fields=["region"])
+            update_fields.append("region")
+        if "allowed_sections" in d:
+            user.userprofile.allowed_sections = d["allowed_sections"]
+            update_fields.append("allowed_sections")
+            
+        if update_fields:
+            user.userprofile.save(update_fields=update_fields)
+            
         profile = user.userprofile
         return Response({
             "id": user.id,
@@ -347,6 +358,7 @@ class ManagerDetailView(APIView):
             "region": profile.region,
             "region_display": profile.get_region_display() if profile.region else "",
             "is_active": user.is_active,
+            "allowed_sections": profile.allowed_sections,
         })
 
     def delete(self, request, pk):
