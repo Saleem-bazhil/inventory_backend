@@ -18,7 +18,8 @@ from .serializers import (
 )
 
 BUFFER_PART_TRANSITIONS = {
-    "BUFFER_IN": "OUT",
+    "BUFFER_IN": "PART_AVAILABILITY_CHECK",
+    "PART_AVAILABILITY_CHECK": "OUT",
     "OUT": "DEFECTIVE_RETURN",
     "DEFECTIVE_RETURN": "REORDER",
     "UNUSED_RETURN": "OUT",
@@ -588,7 +589,7 @@ class BufferPartListCreateView(APIView):
             qs = qs.filter(region=user_region)
         status_type = request.query_params.get("status_type", "").strip()
         if status_type == "unused":
-            qs = qs.filter(status__in=["BUFFER_IN", "UNUSED_RETURN", "PART_RECEIVED"])
+            qs = qs.filter(status__in=["BUFFER_IN", "PART_AVAILABILITY_CHECK", "UNUSED_RETURN", "PART_RECEIVED"])
         elif status_type == "used":
             qs = qs.filter(status__in=["OUT", "DEFECTIVE_RETURN", "CLOSED", "REORDER"])
         # view_mode == "overall" or unset: no region filter — everyone sees all
@@ -715,7 +716,7 @@ class BufferPartTransitionView(APIView):
         case_id = (request.data.get("case_id") or "").strip()
         comment = (request.data.get("remarks") or "").strip()
 
-        if current_status in ("BUFFER_IN", "UNUSED_RETURN"):
+        if next_status == "OUT":
             if not engineer_name:
                 return Response({"engineer_name": ["This field is required."]}, status=status.HTTP_400_BAD_REQUEST)
             if not case_id:
@@ -732,7 +733,7 @@ class BufferPartTransitionView(APIView):
             "updated_by": actor_name,
             "timestamp": timezone.now().isoformat(),
         }
-        if current_status == "BUFFER_IN":
+        if next_status == "OUT":
             entry["engineer_name"] = obj.engineer_name
             entry["case_id"] = obj.case_id
 
@@ -795,7 +796,7 @@ class BufferPartSummaryView(APIView):
 
         grand_total = sum(r["total"] for r in region_list) if not region_filter else (qs.aggregate(total=Sum("quantity"))["total"] or 0)
 
-        unused_total = qs.filter(status__in=["BUFFER_IN", "UNUSED_RETURN", "PART_RECEIVED"]).aggregate(total=Sum("quantity"))["total"] or 0
+        unused_total = qs.filter(status__in=["BUFFER_IN", "PART_AVAILABILITY_CHECK", "UNUSED_RETURN", "PART_RECEIVED"]).aggregate(total=Sum("quantity"))["total"] or 0
         used_total = qs.filter(status__in=["OUT", "DEFECTIVE_RETURN", "CLOSED", "REORDER"]).aggregate(total=Sum("quantity"))["total"] or 0
 
         return Response({
