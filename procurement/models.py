@@ -179,6 +179,7 @@ class BufferPart(models.Model):
         choices=[
             ("BUFFER_IN", "BUFFER In"),
             ("PART_AVAILABILITY_CHECK", "Part Availability Check"),
+            ("USABLE_READY_TO_USE", "Usable (Good Part) ready to use"),
             ("OUT", "Out"),
             ("DEFECTIVE_RETURN", "Defective Return"),
             ("UNUSED_RETURN", "Unused Return"),
