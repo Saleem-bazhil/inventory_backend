@@ -21,10 +21,12 @@ BUFFER_PART_TRANSITIONS = {
     "BUFFER_IN": "PART_AVAILABILITY_CHECK",
     "PART_AVAILABILITY_CHECK": "USABLE_READY_TO_USE",
     "USABLE_READY_TO_USE": "OUT",
-    "DEFECTIVE_NOT_READY_TO_USE": "REORDER",
-    "OUT": "DEFECTIVE_RETURN",
-    "DEFECTIVE_RETURN": "REORDER",
+    "DEFECTIVE_NOT_READY_TO_USE": "PART_HANDOVER_BY_ENGINEER",
+    "OUT": "WORK_STATUS",
+    "WORK_STATUS": "DEFECTIVE_RETURN",
+    "DEFECTIVE_RETURN": "PART_HANDOVER_BY_ENGINEER",
     "UNUSED_RETURN": "OUT",
+    "PART_HANDOVER_BY_ENGINEER": "REORDER",
     "REORDER": "PART_RECEIVED",
     "PART_RECEIVED": "BUFFER_IN",
     "CLOSED": "BUFFER_IN",
@@ -593,7 +595,7 @@ class BufferPartListCreateView(APIView):
         if status_type == "unused":
             qs = qs.filter(status__in=["BUFFER_IN", "PART_AVAILABILITY_CHECK", "USABLE_READY_TO_USE", "DEFECTIVE_NOT_READY_TO_USE", "UNUSED_RETURN", "PART_RECEIVED"])
         elif status_type == "used":
-            qs = qs.filter(status__in=["OUT", "DEFECTIVE_RETURN", "CLOSED", "REORDER"])
+            qs = qs.filter(status__in=["OUT", "WORK_STATUS", "DEFECTIVE_RETURN", "PART_HANDOVER_BY_ENGINEER", "CLOSED", "REORDER"])
         # view_mode == "overall" or unset: no region filter — everyone sees all
 
         search = request.query_params.get("search", "").strip()
@@ -799,7 +801,7 @@ class BufferPartSummaryView(APIView):
         grand_total = sum(r["total"] for r in region_list) if not region_filter else (qs.aggregate(total=Sum("quantity"))["total"] or 0)
 
         unused_total = qs.filter(status__in=["BUFFER_IN", "PART_AVAILABILITY_CHECK", "USABLE_READY_TO_USE", "DEFECTIVE_NOT_READY_TO_USE", "UNUSED_RETURN", "PART_RECEIVED"]).aggregate(total=Sum("quantity"))["total"] or 0
-        used_total = qs.filter(status__in=["OUT", "DEFECTIVE_RETURN", "CLOSED", "REORDER"]).aggregate(total=Sum("quantity"))["total"] or 0
+        used_total = qs.filter(status__in=["OUT", "WORK_STATUS", "DEFECTIVE_RETURN", "PART_HANDOVER_BY_ENGINEER", "CLOSED", "REORDER"]).aggregate(total=Sum("quantity"))["total"] or 0
 
         return Response({
             "regions": region_list,
