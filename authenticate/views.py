@@ -335,6 +335,8 @@ class ManagerDetailView(APIView):
             user.last_name = d["last_name"]
         if "password" in d:
             user.set_password(d["password"])
+        if "is_active" in d:
+            user.is_active = d["is_active"]
         user.save()
         
         update_fields = []
@@ -365,8 +367,7 @@ class ManagerDetailView(APIView):
         user = self._get_user(pk)
         if not user:
             return Response({"detail": "Manager not found."}, status=status.HTTP_404_NOT_FOUND)
-        user.is_active = False
-        user.save(update_fields=["is_active"])
+        user.delete()
         return Response(status=status.HTTP_204_NO_CONTENT)
 
 
