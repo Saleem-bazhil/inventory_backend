@@ -145,6 +145,7 @@ class ManagerSerializer(serializers.Serializer):
         allow_blank=True,
         default="",
     )
+    is_active = serializers.BooleanField(required=False)
     allowed_sections = serializers.ListField(
         child=serializers.CharField(),
         required=False,
