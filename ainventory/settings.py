@@ -18,7 +18,7 @@ SECRET_KEY = os.environ.get(
 )
 DEBUG = True
 
-ALLOWED_HOSTS = os.environ.get("ALLOWED_HOSTS", "inventory.bazhilgroups.in,localhost,127.0.0.1").split(",")
+ALLOWED_HOSTS = os.environ.get("ALLOWED_HOSTS", "inventory.bazhilgroups.in,inventoryback.systimus.in,localhost,127.0.0.1").split(",")
 
 
 INSTALLED_APPS = [
@@ -131,7 +131,7 @@ CORS_ALLOWED_ORIGINS = os.environ.get(
 
 CSRF_TRUSTED_ORIGINS = os.environ.get(
     "CSRF_TRUSTED_ORIGINS",
-    "https://inventory.bazhilgroups.in,https://inventory.systimus.in,https://inventory-frontend-sigma-one.vercel.app",
+    "https://inventory.bazhilgroups.in,inventoryback.systimus.in,https://inventory.systimus.in,https://inventory-frontend-sigma-one.vercel.app",
 ).split(",")
 
 # Fast2SMS configuration
