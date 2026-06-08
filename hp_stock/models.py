@@ -20,7 +20,7 @@ class HPStockItem(models.Model):
             ("WORK_STATUS", "Work Status"),
             ("UNUSED_RETURN", "Unused Part"),
             ("DEFECTIVE_RETURN", "Old/Defective Part"),
-            ("HANDOVER", "Handover by Engineer"),
+            ("HANDOVER", "Part Handover by Engineer"),
             ("CLOSED", "Close the Case"),
         ],
         default="PENDING",

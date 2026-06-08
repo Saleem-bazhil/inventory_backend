@@ -25,16 +25,20 @@ def ensure_user_profile(user):
 class AuthUserSerializer(serializers.ModelSerializer):
     role = serializers.SerializerMethodField()
     region = serializers.SerializerMethodField()
+    allowed_sections = serializers.SerializerMethodField()
 
     class Meta:
         model = User
-        fields = ["id", "username", "first_name", "last_name", "email", "role", "region"]
+        fields = ["id", "username", "first_name", "last_name", "email", "role", "region", "allowed_sections"]
 
     def get_role(self, obj):
         return ensure_user_profile(obj).role
 
     def get_region(self, obj):
         return ensure_user_profile(obj).region
+
+    def get_allowed_sections(self, obj):
+        return ensure_user_profile(obj).allowed_sections
 
 
 class RegisterSerializer(serializers.ModelSerializer):
@@ -141,6 +145,12 @@ class ManagerSerializer(serializers.Serializer):
         allow_blank=True,
         default="",
     )
+    is_active = serializers.BooleanField(required=False)
+    allowed_sections = serializers.ListField(
+        child=serializers.CharField(),
+        required=False,
+        default=list
+    )
 
     def validate_username(self, value):
         if self.instance is None and User.objects.filter(username=value).exists():
@@ -149,6 +159,7 @@ class ManagerSerializer(serializers.Serializer):
 
     def create(self, validated_data):
         region = validated_data.pop("region", "")
+        allowed_sections = validated_data.pop("allowed_sections", [])
         password = validated_data.pop("password", None)
         if not password:
             raise serializers.ValidationError({"password": "Password is required when creating a manager."})
@@ -156,7 +167,8 @@ class ManagerSerializer(serializers.Serializer):
         profile = ensure_user_profile(user)
         profile.role = UserProfile.MANAGER
         profile.region = region or None
-        profile.save(update_fields=["role", "region"])
+        profile.allowed_sections = allowed_sections
+        profile.save(update_fields=["role", "region", "allowed_sections"])
         return user
 
 

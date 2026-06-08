@@ -6,6 +6,7 @@ from .views import (
     BufferPartListCreateView,
     BufferPartSummaryView,
     BufferPartTransitionView,
+    BufferPartSendOTPView,
     BufferReleaseView,
     BufferUpdateView,
     LowStockView,
@@ -48,5 +49,6 @@ urlpatterns = [
     path('buffer-parts/', BufferPartListCreateView.as_view(), name='buffer-parts-list'),
     path('buffer-parts/<int:pk>/', BufferPartDetailView.as_view(), name='buffer-parts-detail'),
     path('buffer-parts/<int:pk>/transition/', BufferPartTransitionView.as_view(), name='buffer-parts-transition'),
+    path('buffer-parts/<int:pk>/send-otp/', BufferPartSendOTPView.as_view(), name='buffer-parts-send-otp'),
     path('buffer-parts/summary/', BufferPartSummaryView.as_view(), name='buffer-parts-summary'),
 ]

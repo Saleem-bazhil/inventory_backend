@@ -178,9 +178,14 @@ class BufferPart(models.Model):
         max_length=30,
         choices=[
             ("BUFFER_IN", "BUFFER In"),
-            ("OUT", "Out"),
+            ("PART_AVAILABILITY_CHECK", "Part Availability Check"),
+            ("USABLE_READY_TO_USE", "Usable (Good Part) ready to use"),
+            ("DEFECTIVE_NOT_READY_TO_USE", "Defective (Faulty Part) not ready to use"),
+            ("OUT", "Part Taken by Engineer"),
+            ("WORK_STATUS", "Work Status"),
             ("DEFECTIVE_RETURN", "Defective Return"),
             ("UNUSED_RETURN", "Unused Return"),
+            ("PART_HANDOVER_BY_ENGINEER", "Part Handover by Engineer"),
             ("REORDER", "Reorder"),
             ("PART_RECEIVED", "Part Received"),
             ("CLOSED", "Closed"),
@@ -189,6 +194,7 @@ class BufferPart(models.Model):
         verbose_name="Status",
     )
     engineer_name = models.CharField(max_length=255, blank=True, default="", verbose_name="Engineer Name")
+    engineer_phone = models.CharField(max_length=20, blank=True, default="", verbose_name="Engineer Phone")
     case_id = models.CharField(max_length=100, blank=True, default="", verbose_name="Case ID")
     transition_history = models.JSONField(default=list, blank=True, verbose_name="Transition History")
     created_by = models.ForeignKey(
