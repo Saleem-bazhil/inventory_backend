@@ -131,7 +131,7 @@ CORS_ALLOWED_ORIGINS = os.environ.get(
 
 CSRF_TRUSTED_ORIGINS = os.environ.get(
     "CSRF_TRUSTED_ORIGINS",
-    "https://inventory.bazhilgroups.in,inventoryback.systimus.in,https://inventory.systimus.in,https://inventory-frontend-sigma-one.vercel.app",
+    "https://inventory.bazhilgroups.in,https://inventoryback.systimus.in,https://inventory.systimus.in,https://inventory-frontend-sigma-one.vercel.app",
 ).split(",")
 
 # Fast2SMS configuration
