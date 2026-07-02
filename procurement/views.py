@@ -912,3 +912,181 @@ class BufferPartSummaryView(APIView):
             "unused": unused_total,
         })
 
+
+class ReportsSummaryView(APIView):
+    """
+    GET /api/reports/summary/
+    Returns comprehensive inventory valuation and status metrics for:
+    - RTPL Stock (StockItem)
+    - HP Stock (HPStockItem)
+    - Buffer Stock (BufferPart)
+    """
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get(self, request):
+        from django.db.models import Sum
+        from hp_stock.models import HPStockItem
+
+        # 1. RTPL Stock Metrics
+        inventory_value = 0.0
+        for item in StockItem.objects.all():
+            cost = item.unit_cost or 0
+            inventory_value += item.qty_on_hand * float(cost)
+
+        total_inflow = StockMovement.objects.filter(
+            movement_type__in=['in', 'buffer_in']
+        ).aggregate(s=Sum('quantity'))['s'] or 0
+        inflow_adj = StockMovement.objects.filter(
+            movement_type='adjustment',
+            quantity__gt=0
+        ).aggregate(s=Sum('quantity'))['s'] or 0
+        total_inflow += inflow_adj
+
+        total_outflow = StockMovement.objects.filter(
+            movement_type__in=['out', 'buffer_out']
+        ).aggregate(s=Sum('quantity'))['s'] or 0
+        outflow_adj = StockMovement.objects.filter(
+            movement_type='adjustment',
+            quantity__lt=0
+        ).aggregate(s=Sum('quantity'))['s'] or 0
+        total_outflow += abs(outflow_adj)
+
+        category_count = StockItem.objects.exclude(category='').values('category').distinct().count()
+
+        rtpl_data = {
+            "inventory_value": inventory_value,
+            "total_inflow": total_inflow,
+            "total_outflow": total_outflow,
+            "category_count": category_count,
+        }
+
+        # 2. HP Stock Metrics
+        hp_qs = HPStockItem.objects.all()
+        hp_data = {
+            "total_items": hp_qs.count(),
+            "pending": hp_qs.filter(status='PENDING').count(),
+            "stock_check": hp_qs.filter(status='STOCK_CHECK').count(),
+            "issued": hp_qs.filter(status='ISSUED').count(),
+            "defective": hp_qs.filter(status='DEFECTIVE_RETURN').count(),
+            "closed": hp_qs.filter(status='CLOSED').count(),
+        }
+
+        # 3. Buffer Stock Metrics
+        buffer_qs = BufferPart.objects.all()
+        buffer_data = {
+            "total_parts": buffer_qs.count(),
+            "total_quantity": buffer_qs.aggregate(s=Sum('quantity'))['s'] or 0,
+            "usable": buffer_qs.filter(status='USABLE_READY_TO_USE').aggregate(s=Sum('quantity'))['s'] or 0,
+            "defective": buffer_qs.filter(status='DEFECTIVE_NOT_READY_TO_USE').aggregate(s=Sum('quantity'))['s'] or 0,
+            "taken_by_engineer": buffer_qs.filter(status='OUT').aggregate(s=Sum('quantity'))['s'] or 0,
+        }
+
+        return Response({
+            "rtpl": rtpl_data,
+            "hp_stock": hp_data,
+            "buffer_stock": buffer_data,
+        })
+
+
+class ReportsByCategoryView(APIView):
+    """
+    GET /api/reports/by-category/
+    Returns a breakdown of stock items grouped by category.
+    """
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get(self, request):
+        categories_data = {}
+        for item in StockItem.objects.all():
+            cat = item.category.strip() if item.category else "Uncategorized"
+            if cat not in categories_data:
+                categories_data[cat] = {
+                    "category": cat,
+                    "total_stock": 0,
+                    "material_count": 0,
+                    "value": 0.0
+                }
+            categories_data[cat]["total_stock"] += item.qty_on_hand
+            categories_data[cat]["material_count"] += 1
+            cost = item.unit_cost or 0
+            categories_data[cat]["value"] += item.qty_on_hand * float(cost)
+
+        return Response(list(categories_data.values()))
+
+
+class RecentStockMovementsView(APIView):
+    """
+    GET /api/reports/recent-movements/
+    Returns unified feeds of:
+    - RTPL Stock movements (StockMovement)
+    - HP Stock updates (HPStockItem)
+    - Buffer Stock transitions (BufferPart)
+    """
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get(self, request):
+        from hp_stock.models import HPStockItem
+
+        # 1. RTPL Movements
+        movements = StockMovement.objects.select_related('stock_item', 'performed_by').all().order_by('-created_at')[:10]
+        rtpl_list = []
+        for m in movements:
+            user = m.performed_by
+            user_name = f"{user.first_name} {user.last_name}".strip() or user.username
+            rtpl_list.append({
+                "id": m.id,
+                "part_number": m.stock_item.part_number,
+                "part_name": m.stock_item.part_name,
+                "movement_type": m.movement_type,
+                "quantity": m.quantity,
+                "performed_by": user_name,
+                "notes": m.notes or "",
+                "created_at": m.created_at.isoformat() if m.created_at else "",
+            })
+
+        # 2. HP Stock Items
+        hp_items = HPStockItem.objects.select_related('created_by').all().order_by('-updated_at')[:10]
+        hp_list = []
+        for h in hp_items:
+            creator = h.created_by
+            creator_name = f"{creator.first_name} {creator.last_name}".strip() if creator else "System"
+            hp_list.append({
+                "id": h.id,
+                "case_id": h.case_id,
+                "work_order_id": h.work_order_id,
+                "status": h.status,
+                "status_display": h.get_status_display(),
+                "engineer_name": h.engineer_name,
+                "region": h.region,
+                "created_by": creator_name,
+                "updated_at": h.updated_at.isoformat() if h.updated_at else "",
+            })
+
+        # 3. Buffer Parts
+        buffer_parts = BufferPart.objects.select_related('created_by').all().order_by('-created_at')[:10]
+        buffer_list = []
+        for b in buffer_parts:
+            creator = b.created_by
+            creator_name = f"{creator.first_name} {creator.last_name}".strip() if creator else "System"
+            buffer_list.append({
+                "id": b.id,
+                "part_number": b.part_number,
+                "part_name": b.part_name,
+                "quantity": b.quantity,
+                "status": b.status,
+                "status_display": b.get_status_display() if hasattr(b, 'get_status_display') else b.status,
+                "engineer_name": b.engineer_name,
+                "region": b.region,
+                "created_by": creator_name,
+                "created_at": b.created_at.isoformat() if b.created_at else "",
+            })
+
+        return Response({
+            "rtpl": rtpl_list,
+            "hp": hp_list,
+            "buffer": buffer_list,
+        })
+
+
+
+

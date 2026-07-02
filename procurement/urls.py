@@ -21,6 +21,9 @@ from .views import (
     StockReleaseView,
     StockReserveView,
     StockSearchView,
+    ReportsSummaryView,
+    ReportsByCategoryView,
+    RecentStockMovementsView,
 )
 
 urlpatterns = [
@@ -51,4 +54,9 @@ urlpatterns = [
     path('buffer-parts/<int:pk>/transition/', BufferPartTransitionView.as_view(), name='buffer-parts-transition'),
     path('buffer-parts/<int:pk>/send-otp/', BufferPartSendOTPView.as_view(), name='buffer-parts-send-otp'),
     path('buffer-parts/summary/', BufferPartSummaryView.as_view(), name='buffer-parts-summary'),
+
+    # Inventory Reports
+    path('reports/summary/', ReportsSummaryView.as_view(), name='reports-summary'),
+    path('reports/by-category/', ReportsByCategoryView.as_view(), name='reports-by-category'),
+    path('reports/recent-movements/', RecentStockMovementsView.as_view(), name='reports-recent-movements'),
 ]
