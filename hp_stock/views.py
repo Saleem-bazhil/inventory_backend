@@ -83,6 +83,7 @@ class HPStockItemViewSet(viewsets.ModelViewSet):
         search = self.request.query_params.get('search', '')
         region = self.request.query_params.get('region', '')
         is_closed_param = self.request.query_params.get('is_closed', '').strip().lower()
+        date_param = self.request.query_params.get('date', '').strip()
 
         if region and region != 'all':
             # Non-admins should not be able to bypass their region check
@@ -100,6 +101,12 @@ class HPStockItemViewSet(viewsets.ModelViewSet):
             queryset = queryset.filter(status='CLOSED')
         elif is_closed_param == 'false':
             queryset = queryset.exclude(status='CLOSED')
+
+        if date_param:
+            queryset = queryset.filter(
+                Q(case_created_time__date=date_param) |
+                Q(case_created_time__isnull=True, created_at__date=date_param)
+            )
 
         if search:
             queryset = queryset.filter(

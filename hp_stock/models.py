@@ -28,7 +28,12 @@ class HPStockItem(models.Model):
     )
     engineer_name = models.CharField(max_length=255, blank=True, default="", verbose_name="Engineer Name")
     engineer_phone = models.CharField(max_length=20, blank=True, default="", verbose_name="Engineer Phone")
+    part_description = models.TextField(blank=True, default="", verbose_name="Part Description")
+    customer_name = models.CharField(max_length=255, blank=True, default="", verbose_name="Customer Name")
+    inventory_details = models.TextField(blank=True, default="", verbose_name="Inventory Details")
     transition_history = models.JSONField(default=list, blank=True, verbose_name="Transition History")
+    opencall_case_details = models.JSONField(default=dict, blank=True, verbose_name="Opencall Case Details")
+    case_created_time = models.DateTimeField(null=True, blank=True, verbose_name="Case Created Time")
     created_by = models.ForeignKey(
         User, on_delete=models.SET_NULL, null=True, blank=True,
         related_name="hp_stock_items",
@@ -37,7 +42,7 @@ class HPStockItem(models.Model):
     updated_at = models.DateTimeField(auto_now=True)
 
     class Meta:
-        ordering = ["-created_at"]
+        ordering = ["-case_created_time", "-created_at"]
         verbose_name = "HP Stock Item"
         verbose_name_plural = "HP Stock Items"
 
