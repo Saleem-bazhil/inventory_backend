@@ -4,8 +4,8 @@ from rest_framework.response import Response
 from rest_framework.decorators import action
 from django.db.models import Count, Q
 from django.utils import timezone
-from .models import HPStockItem
-from .serializers import HPStockItemSerializer
+from .models import HPStockItem, HPStockRMAPart
+from .serializers import HPStockItemSerializer, HPStockRMAPartSerializer
 
 from rest_framework.pagination import PageNumberPagination
 import math
@@ -97,10 +97,13 @@ class HPStockItemViewSet(viewsets.ModelViewSet):
             if user_region:
                 queryset = queryset.filter(region=user_region)
 
-        if is_closed_param == 'true':
-            queryset = queryset.filter(status='CLOSED')
-        elif is_closed_param == 'false':
-            queryset = queryset.exclude(status='CLOSED')
+        if self.action != 'summary':
+            if is_closed_param == 'true':
+                queryset = queryset.filter(status='CLOSED')
+            elif is_closed_param == 'dc_cut_request':
+                queryset = queryset.filter(status='DC_CUT_REQUEST')
+            elif is_closed_param == 'false':
+                queryset = queryset.exclude(status__in=['CLOSED', 'DC_CUT_REQUEST'])
 
         if date_param:
             queryset = queryset.filter(
@@ -126,16 +129,19 @@ class HPStockItemViewSet(viewsets.ModelViewSet):
     def summary(self, request):
         queryset = self.get_queryset()
         total = queryset.count()
-        active_total = queryset.exclude(status='CLOSED').count()
+        active_total = queryset.exclude(status__in=['CLOSED', 'DC_CUT_REQUEST']).count()
+        dc_cut_request_total = queryset.filter(status='DC_CUT_REQUEST').count()
         closed_total = queryset.filter(status='CLOSED').count()
         regions = queryset.values('region').annotate(
             total=Count('id'),
-            active=Count('id', filter=~Q(status='CLOSED')),
+            active=Count('id', filter=~Q(status__in=['CLOSED', 'DC_CUT_REQUEST'])),
+            dc_cut_request=Count('id', filter=Q(status='DC_CUT_REQUEST')),
             closed=Count('id', filter=Q(status='CLOSED'))
         ).order_by('-total')
         return Response({
             'total': total,
             'active_total': active_total,
+            'dc_cut_request_total': dc_cut_request_total,
             'closed_total': closed_total,
             'regions': list(regions)
         })
@@ -182,12 +188,15 @@ class HPStockItemViewSet(viewsets.ModelViewSet):
         
         HP_STOCK_TRANSITIONS = {
             "PENDING": ["STOCK_CHECK"],
-            "STOCK_CHECK": ["ISSUED"],
+            "STOCK_CHECK": ["GOOD_PART_PHOTO"],
+            "GOOD_PART_PHOTO": ["ISSUED"],
             "ISSUED": ["WORK_STATUS"],
             "WORK_STATUS": ["UNUSED_RETURN", "DEFECTIVE_RETURN"],
             "UNUSED_RETURN": ["HANDOVER"],
             "DEFECTIVE_RETURN": ["HANDOVER"],
-            "HANDOVER": ["CLOSED"],
+            "HANDOVER": ["RETURN_PART_PHOTO"],
+            "RETURN_PART_PHOTO": ["DC_CUT_REQUEST"],
+            "DC_CUT_REQUEST": ["CLOSED"],
         }
         
         requested_to_status = request.data.get("to_status")
@@ -245,6 +254,18 @@ class HPStockItemViewSet(viewsets.ModelViewSet):
         if next_status in ["ISSUED", "HANDOVER"] and getattr(obj, "engineer_phone", None):
             entry["engineer_phone"] = obj.engineer_phone
 
+        good_part_image = request.FILES.get("good_part_image")
+        if good_part_image:
+            from django.core.files.storage import default_storage
+            file_name = default_storage.save(f"hp_stock_images/{good_part_image.name}", good_part_image)
+            image_url = default_storage.url(file_name)
+            entry["image"] = image_url
+            
+            if next_status == "GOOD_PART_PHOTO":
+                obj.good_part_image = good_part_image
+            elif next_status == "RETURN_PART_PHOTO":
+                obj.return_part_image = good_part_image
+
         history.append(entry)
         obj.status = next_status
         obj.transition_history = history
@@ -255,6 +276,10 @@ class HPStockItemViewSet(viewsets.ModelViewSet):
             save_fields.append("engineer_name")
         if next_status in ["ISSUED", "HANDOVER"] and getattr(obj, "engineer_phone", None):
             save_fields.append("engineer_phone")
+        if getattr(obj, "good_part_image", None):
+            save_fields.append("good_part_image")
+        if getattr(obj, "return_part_image", None):
+            save_fields.append("return_part_image")
             
         obj.save(update_fields=save_fields)
 
@@ -295,4 +320,148 @@ class HPStockItemViewSet(viewsets.ModelViewSet):
             "otp": otp,  # Return it so frontend can display or prefill for testing/fallback
             "whatsapp_url": whatsapp_url,
             "detail": f"OTP {otp} generated successfully. Please send it to the engineer via WhatsApp."
+        })
+
+
+class HPStockRMAPartViewSet(viewsets.ModelViewSet):
+    serializer_class = HPStockRMAPartSerializer
+    permission_classes = [IsAuthenticated]
+    pagination_class = CustomPageNumberPagination
+
+    def get_queryset(self):
+        queryset = HPStockRMAPart.objects.all()
+        search = self.request.query_params.get("search")
+        if search:
+            queryset = queryset.filter(
+                Q(part_number__icontains=search) |
+                Q(description__icontains=search) |
+                Q(category__icontains=search) |
+                Q(hsn_code__icontains=search)
+            )
+        return queryset
+
+    @action(detail=False, methods=['delete'])
+    def delete_all(self, request):
+        count, _ = HPStockRMAPart.objects.all().delete()
+        return Response({"detail": f"Successfully deleted all {count} parts from the catalog."})
+
+    @action(detail=False, methods=['post'])
+    def import_excel(self, request):
+        file_obj = request.FILES.get('file')
+        if not file_obj:
+            return Response({"detail": "No file was uploaded."}, status=400)
+        
+        try:
+            import pandas as pd
+            df = pd.read_excel(file_obj)
+        except Exception as e:
+            return Response({"detail": f"Failed to parse Excel file: {str(e)}"}, status=400)
+        
+        total_excel_rows = len(df)
+        df.columns = [str(c).strip().lower().replace(' ', '_') for c in df.columns]
+        
+        if 'part' not in df.columns:
+            return Response({"detail": "Excel sheet must contain a 'Part' (part number) column."}, status=400)
+            
+        success_count = 0
+        skipped_empty = 0
+        errors = []
+        
+        from datetime import datetime
+        
+        def clean_val(val):
+            if pd.isna(val):
+                return ""
+            if isinstance(val, float):
+                if val.is_integer():
+                    return str(int(val))
+                return str(val)
+            val_str = str(val).strip()
+            if val_str.endswith('.0'):
+                try:
+                    f_val = float(val_str)
+                    if f_val.is_integer():
+                        return str(int(f_val))
+                except ValueError:
+                    pass
+            return val_str
+
+        # Clear catalog first
+        HPStockRMAPart.objects.all().delete()
+        
+        parts_to_create = []
+        
+        for idx, row in df.iterrows():
+            part_num = clean_val(row.get('part'))
+            if not part_num or part_num == 'nan':
+                skipped_empty += 1
+                continue
+            
+            desc = clean_val(row.get('part_description'))
+            cat = clean_val(row.get('category'))
+            
+            price_val = 0.00
+            try:
+                raw_price = row.get('price', 0.00)
+                if not pd.isna(raw_price):
+                    price_val = float(raw_price)
+            except:
+                pass
+                
+            hsn = clean_val(row.get('hsn_code'))
+            igst = clean_val(row.get('igst'))
+            cgst = clean_val(row.get('cgst'))
+            sgst = clean_val(row.get('sgst'))
+            eosl = clean_val(row.get('eosl_flag'))
+            
+            val_date = None
+            raw_validity = row.get('validity')
+            if raw_validity and not pd.isna(raw_validity):
+                if isinstance(raw_validity, datetime):
+                    val_date = raw_validity.date()
+                else:
+                    date_str = str(raw_validity).strip()
+                    for fmt in ('%d-%m-%Y', '%Y-%m-%d', '%d/%m/%Y', '%m/%d/%Y'):
+                        try:
+                            val_date = datetime.strptime(date_str, fmt).date()
+                            break
+                        except ValueError:
+                            continue
+            
+            p_status = clean_val(row.get('parts_status'))
+
+            parts_to_create.append(HPStockRMAPart(
+                part_number=part_num,
+                description=desc,
+                category=cat,
+                price=price_val,
+                hsn_code=hsn,
+                igst=igst,
+                cgst=cgst,
+                sgst=sgst,
+                eosl_flag=eosl,
+                validity=val_date,
+                parts_status=p_status
+            ))
+
+        # Perform bulk insert
+        try:
+            HPStockRMAPart.objects.bulk_create(parts_to_create, batch_size=5000)
+            success_count = len(parts_to_create)
+        except Exception as ex:
+            return Response({"detail": f"Failed to bulk insert records to database: {str(ex)}"}, status=500)
+                
+        # Prepare response details
+        detail_msg = (
+            f"Processed {total_excel_rows} rows from Excel. "
+            f"Successfully imported all {success_count} parts. "
+            f"Skipped {skipped_empty} empty/invalid rows."
+        )
+        
+        return Response({
+            "detail": detail_msg,
+            "total_excel_rows": total_excel_rows,
+            "success_count": success_count,
+            "skipped_empty": skipped_empty,
+            "errors": errors
         })
