@@ -212,8 +212,18 @@ class HPStockItemViewSet(viewsets.ModelViewSet):
                 status=400,
             )
 
+        if next_status == "CLOSED" and current_status == "DC_CUT_REQUEST":
+            if not obj.dc_cut_approved:
+                return Response(
+                    {"detail": "DC Cut must be approved by the RMA team before closing the case."},
+                    status=400,
+                )
+
         engineer_name = (request.data.get("engineer_name") or "").strip()
         remarks = (request.data.get("remarks") or "").strip()
+        dc_cut_request_message = request.data.get("dc_cut_request_message")
+        if dc_cut_request_message is not None:
+            obj.dc_cut_request_message = dc_cut_request_message.strip()
 
         # OTP Verification for ISSUED or HANDOVER
         if next_status in ["ISSUED", "HANDOVER"]:
@@ -280,6 +290,8 @@ class HPStockItemViewSet(viewsets.ModelViewSet):
             save_fields.append("good_part_image")
         if getattr(obj, "return_part_image", None):
             save_fields.append("return_part_image")
+        if dc_cut_request_message is not None:
+            save_fields.append("dc_cut_request_message")
             
         obj.save(update_fields=save_fields)
 
@@ -321,6 +333,50 @@ class HPStockItemViewSet(viewsets.ModelViewSet):
             "whatsapp_url": whatsapp_url,
             "detail": f"OTP {otp} generated successfully. Please send it to the engineer via WhatsApp."
         })
+
+    @action(detail=True, methods=['post'])
+    def approve_dc_cut(self, request, pk=None):
+        obj = self.get_object()
+        obj.dc_cut_approved = True
+        obj.save(update_fields=['dc_cut_approved'])
+        
+        # Add transition history entry
+        history = list(obj.transition_history or [])
+        actor_name = f"{request.user.first_name} {request.user.last_name}".strip() or request.user.username
+        
+        entry = {
+            "from_status": obj.status,
+            "to_status": obj.status,
+            "comment": "DC Cut Approved by RMA Team",
+            "updated_by": actor_name,
+            "timestamp": timezone.now().isoformat(),
+        }
+        history.append(entry)
+        obj.transition_history = history
+        obj.save(update_fields=['transition_history'])
+        
+        return Response(HPStockItemSerializer(obj).data)
+
+    @action(detail=True, methods=['post'])
+    def send_dc_cut_chat_message(self, request, pk=None):
+        obj = self.get_object()
+        message = (request.data.get("message") or "").strip()
+        if not message:
+            return Response({"detail": "Message content cannot be empty."}, status=400)
+        
+        chat = list(obj.dc_cut_chat or [])
+        actor_name = f"{request.user.first_name} {request.user.last_name}".strip() or request.user.username
+        
+        entry = {
+            "sender": actor_name,
+            "message": message,
+            "timestamp": timezone.now().isoformat(),
+        }
+        chat.append(entry)
+        obj.dc_cut_chat = chat
+        obj.save(update_fields=['dc_cut_chat'])
+        
+        return Response(HPStockItemSerializer(obj).data)
 
 
 class HPStockRMAPartViewSet(viewsets.ModelViewSet):

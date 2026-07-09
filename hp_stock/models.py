@@ -11,6 +11,9 @@ class HPStockItem(models.Model):
     gvrma_no = models.CharField(max_length=100, blank=True, default="", verbose_name="GVRMA No")
     good_part_image = models.FileField(upload_to="hp_stock_images/", blank=True, null=True, verbose_name="Good Part Photo")
     return_part_image = models.FileField(upload_to="hp_stock_images/", blank=True, null=True, verbose_name="Return Part Photo")
+    dc_cut_request_message = models.TextField(blank=True, default="", verbose_name="DC Cut Request Message")
+    dc_cut_approved = models.BooleanField(default=False, verbose_name="DC Cut Approved")
+    dc_cut_chat = models.JSONField(default=list, blank=True, verbose_name="DC Cut Chat Logs")
     
     region = models.CharField(max_length=20, blank=True, default="", verbose_name="Region")
     status = models.CharField(
