@@ -10,6 +10,7 @@ class HPStockItem(models.Model):
     hp_sales_order_no = models.CharField(max_length=100, blank=True, default="", verbose_name="HP Sales Order No")
     gvrma_no = models.CharField(max_length=100, blank=True, default="", verbose_name="GVRMA No")
     good_part_image = models.FileField(upload_to="hp_stock_images/", blank=True, null=True, verbose_name="Good Part Photo")
+    good_part_image_back = models.FileField(upload_to="hp_stock_images/", blank=True, null=True, verbose_name="Good Part Back Photo")
     return_part_image = models.FileField(upload_to="hp_stock_images/", blank=True, null=True, verbose_name="Return Part Photo")
     dc_cut_request_message = models.TextField(blank=True, default="", verbose_name="DC Cut Request Message")
     dc_cut_approved = models.BooleanField(default=False, verbose_name="DC Cut Approved")

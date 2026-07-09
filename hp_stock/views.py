@@ -276,6 +276,16 @@ class HPStockItemViewSet(viewsets.ModelViewSet):
             elif next_status == "RETURN_PART_PHOTO":
                 obj.return_part_image = good_part_image
 
+        good_part_image_back = request.FILES.get("good_part_image_back")
+        if good_part_image_back:
+            from django.core.files.storage import default_storage
+            file_name = default_storage.save(f"hp_stock_images/{good_part_image_back.name}", good_part_image_back)
+            image_url_back = default_storage.url(file_name)
+            entry["image_back"] = image_url_back
+            
+            if next_status == "GOOD_PART_PHOTO":
+                obj.good_part_image_back = good_part_image_back
+
         history.append(entry)
         obj.status = next_status
         obj.transition_history = history
@@ -288,6 +298,8 @@ class HPStockItemViewSet(viewsets.ModelViewSet):
             save_fields.append("engineer_phone")
         if getattr(obj, "good_part_image", None):
             save_fields.append("good_part_image")
+        if getattr(obj, "good_part_image_back", None):
+            save_fields.append("good_part_image_back")
         if getattr(obj, "return_part_image", None):
             save_fields.append("return_part_image")
         if dc_cut_request_message is not None:
