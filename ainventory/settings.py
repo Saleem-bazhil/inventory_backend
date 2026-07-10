@@ -131,14 +131,11 @@ if USE_S3:
     AWS_STORAGE_BUCKET_NAME = os.environ.get("AWS_STORAGE_BUCKET_NAME")
     AWS_S3_REGION_NAME = os.environ.get("AWS_S3_REGION_NAME", "ap-south-1")
 
-    # Private objects served via temporary signed URLs. The bucket stays
-    # private (no public access needed); each generated URL expires after
-    # AWS_QUERYSTRING_EXPIRE seconds. ACLs are disabled on the bucket
-    # ("Bucket owner enforced"), so we never send per-object ACLs.
-    AWS_QUERYSTRING_AUTH = True
-    AWS_QUERYSTRING_EXPIRE = int(
-        os.environ.get("AWS_QUERYSTRING_EXPIRE", 3600)  # 1 hour
-    )
+    # Public objects served over permanent, non-expiring URLs (images must
+    # stay viewable indefinitely — signed URLs cap out at AWS's 7-day limit).
+    # Public read is granted by the bucket policy; ACLs are disabled on the
+    # bucket ("Bucket owner enforced"), so we never send per-object ACLs.
+    AWS_QUERYSTRING_AUTH = False
     AWS_DEFAULT_ACL = None
     AWS_S3_FILE_OVERWRITE = False
     AWS_S3_OBJECT_PARAMETERS = {"CacheControl": "max-age=86400"}
