@@ -8,15 +8,21 @@ import os
 from pathlib import Path
 
 import dj_database_url
+from dotenv import load_dotenv
 
 
 BASE_DIR = Path(__file__).resolve().parent.parent
+
+# Load environment variables from a local .env file (never committed).
+load_dotenv(BASE_DIR / ".env")
 
 SECRET_KEY = os.environ.get(
     "DJANGO_SECRET_KEY",
     "django-insecure-eqem)23jqdvtj64m85suojxx-=bt^q@i-mvkg8hpot_-)6$*2d",
 )
-DEBUG = True
+
+# DEBUG must be False in production. Controlled via the DEBUG env var.
+DEBUG = os.environ.get("DEBUG", "False").lower() in ("true", "1", "yes")
 
 ALLOWED_HOSTS = os.environ.get("ALLOWED_HOSTS", "inventory.bazhilgroups.in,inventoryback.systimus.in,localhost,127.0.0.1").split(",")
 
@@ -50,6 +56,7 @@ INSTALLED_APPS = [
 MIDDLEWARE = [
     "corsheaders.middleware.CorsMiddleware",
     "django.middleware.security.SecurityMiddleware",
+    "whitenoise.middleware.WhiteNoiseMiddleware",
     "django.contrib.sessions.middleware.SessionMiddleware",
     "django.middleware.common.CommonMiddleware",
     "django.middleware.csrf.CsrfViewMiddleware",
@@ -109,10 +116,70 @@ STATIC_URL = "/static/"
 STATICFILES_DIRS = [BASE_DIR / "static"]
 STATIC_ROOT = BASE_DIR / "staticfiles"
 
-MEDIA_URL = "/media/"
-MEDIA_ROOT = BASE_DIR / "media"
+# WhiteNoise serves static files (incl. the admin) straight from gunicorn,
+# compressed, so the app works with DEBUG=False without a separate web server.
+_STATICFILES_BACKEND = "whitenoise.storage.CompressedStaticFilesStorage"
+
+# --- Media / file storage -------------------------------------------------
+# Uploaded files (e.g. HP stock part photos) go to AWS S3 when USE_S3 is
+# enabled; otherwise they fall back to local disk for development.
+USE_S3 = os.environ.get("USE_S3", "False").lower() in ("true", "1", "yes")
+
+if USE_S3:
+    AWS_ACCESS_KEY_ID = os.environ.get("AWS_ACCESS_KEY_ID")
+    AWS_SECRET_ACCESS_KEY = os.environ.get("AWS_SECRET_ACCESS_KEY")
+    AWS_STORAGE_BUCKET_NAME = os.environ.get("AWS_STORAGE_BUCKET_NAME")
+    AWS_S3_REGION_NAME = os.environ.get("AWS_S3_REGION_NAME", "ap-south-1")
+
+    # Private objects served via temporary signed URLs. The bucket stays
+    # private (no public access needed); each generated URL expires after
+    # AWS_QUERYSTRING_EXPIRE seconds. ACLs are disabled on the bucket
+    # ("Bucket owner enforced"), so we never send per-object ACLs.
+    AWS_QUERYSTRING_AUTH = True
+    AWS_QUERYSTRING_EXPIRE = int(
+        os.environ.get("AWS_QUERYSTRING_EXPIRE", 3600)  # 1 hour
+    )
+    AWS_DEFAULT_ACL = None
+    AWS_S3_FILE_OVERWRITE = False
+    AWS_S3_OBJECT_PARAMETERS = {"CacheControl": "max-age=86400"}
+    # Use the regional endpoint + SigV4 so signed URLs validate without a
+    # redirect (the global s3.amazonaws.com endpoint breaks signatures for
+    # regions like ap-south-1).
+    AWS_S3_ENDPOINT_URL = os.environ.get(
+        "AWS_S3_ENDPOINT_URL", f"https://s3.{AWS_S3_REGION_NAME}.amazonaws.com"
+    )
+    AWS_S3_SIGNATURE_VERSION = "s3v4"
+    AWS_S3_ADDRESSING_STYLE = "virtual"
+
+    _DEFAULT_STORAGE_BACKEND = "storages.backends.s3.S3Storage"
+    MEDIA_URL = f"https://{AWS_STORAGE_BUCKET_NAME}.s3.{AWS_S3_REGION_NAME}.amazonaws.com/"
+else:
+    _DEFAULT_STORAGE_BACKEND = "django.core.files.storage.FileSystemStorage"
+    MEDIA_URL = "/media/"
+    MEDIA_ROOT = BASE_DIR / "media"
+
+STORAGES = {
+    "default": {"BACKEND": _DEFAULT_STORAGE_BACKEND},
+    "staticfiles": {"BACKEND": _STATICFILES_BACKEND},
+}
 
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
+
+# --- Production security --------------------------------------------------
+# Applied only when DEBUG is off. Assumes TLS is terminated by the reverse
+# proxy (Traefik/Dokploy), which forwards X-Forwarded-Proto.
+if not DEBUG:
+    SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
+    SESSION_COOKIE_SECURE = True
+    CSRF_COOKIE_SECURE = True
+    SECURE_HSTS_SECONDS = int(os.environ.get("SECURE_HSTS_SECONDS", 0))
+    SECURE_HSTS_INCLUDE_SUBDOMAINS = True
+    SECURE_HSTS_PRELOAD = True
+    SECURE_CONTENT_TYPE_NOSNIFF = True
+    # Off by default to avoid redirect loops behind a proxy; enable via env.
+    SECURE_SSL_REDIRECT = os.environ.get(
+        "SECURE_SSL_REDIRECT", "False"
+    ).lower() in ("true", "1", "yes")
 
 REST_FRAMEWORK = {
     "DEFAULT_AUTHENTICATION_CLASSES": [

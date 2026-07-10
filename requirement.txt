@@ -12,6 +12,10 @@ PyJWT==2.12.1
 requests==2.32.3
 psycopg2-binary==2.9.10
 dj-database-url==2.3.0
+django-storages==1.14.6
+boto3==1.43.45
+python-dotenv==1.2.2
+whitenoise==6.12.0
 sqlparse==0.5.5
 tzdata==2025.3
 urllib3==2.6.3
