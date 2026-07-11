@@ -84,6 +84,8 @@ class HPStockItemViewSet(viewsets.ModelViewSet):
         region = self.request.query_params.get('region', '')
         is_closed_param = self.request.query_params.get('is_closed', '').strip().lower()
         date_param = self.request.query_params.get('date', '').strip()
+        warranty_trade_param = self.request.query_params.get('warranty_trade', '').strip()
+        part_shipment_status_param = self.request.query_params.get('part_shipment_status', '').strip()
 
         if region and region != 'all':
             # Non-admins should not be able to bypass their region check
@@ -111,6 +113,12 @@ class HPStockItemViewSet(viewsets.ModelViewSet):
                 Q(case_created_time__isnull=True, created_at__date=date_param)
             )
 
+        if warranty_trade_param and warranty_trade_param.lower() != 'all':
+            queryset = queryset.filter(warranty_trade=warranty_trade_param)
+
+        if part_shipment_status_param and part_shipment_status_param.lower() != 'all':
+            queryset = queryset.filter(part_shipment_status=part_shipment_status_param)
+
         if search:
             queryset = queryset.filter(
                 Q(case_id__icontains=search) |
@@ -120,10 +128,38 @@ class HPStockItemViewSet(viewsets.ModelViewSet):
                 Q(material_order_no__icontains=search) |
                 Q(hp_sales_order_no__icontains=search) |
                 Q(gvrma_no__icontains=search) |
+                Q(good_part_number__icontains=search) |
+                Q(part_order_number__icontains=search) |
+                Q(so_number__icontains=search) |
                 Q(engineer_name__icontains=search)
             )
 
         return queryset
+
+    @action(detail=False, methods=['get'])
+    def filter_options(self, request):
+        """Distinct, region-scoped values for the Warranty/Trade and Part
+        Shipment Status filter dropdowns (so the UI reflects real data)."""
+        qs = HPStockItem.objects.all()
+        profile = getattr(request.user, 'userprofile', None)
+        role = profile.role if profile else ''
+        if role not in ['admin', 'super_admin', 'manager']:
+            user_region = profile.region if profile else ''
+            if user_region:
+                qs = qs.filter(region=user_region)
+
+        warranty_trade = sorted(
+            v for v in qs.exclude(warranty_trade='')
+            .values_list('warranty_trade', flat=True).distinct() if v
+        )
+        part_shipment_status = sorted(
+            v for v in qs.exclude(part_shipment_status='')
+            .values_list('part_shipment_status', flat=True).distinct() if v
+        )
+        return Response({
+            'warranty_trade': warranty_trade,
+            'part_shipment_status': part_shipment_status,
+        })
 
     @action(detail=False, methods=['get'])
     def summary(self, request):
