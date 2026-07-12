@@ -372,6 +372,33 @@ class HPStockItemViewSet(viewsets.ModelViewSet):
             if next_status == "GOOD_PART_PHOTO":
                 obj.good_part_image_back = good_part_image_back
 
+        # Return part photo categories (all optional, only on RETURN_PART_PHOTO)
+        return_photo_fields = [
+            ("return_part_ct_image", "Part CT Image"),
+            ("return_box_front_image", "Box with Part Front Image"),
+            ("return_box_back_image", "Box with Part Back Image"),
+            ("return_box_corner_right_image", "Box with Part Corner Right Side Image"),
+            ("return_box_corner_left_image", "Box with Part Corner Left Side Image"),
+            ("return_box_corner_top_image", "Box with Part Corner Top Side Image"),
+            ("return_box_corner_bottom_image", "Box with Part Corner Bottom Side Image"),
+            ("return_option_image_1", "Option Image 1"),
+            ("return_option_image_2", "Option Image 2"),
+            ("return_option_image_3", "Option Image 3"),
+        ]
+        uploaded_return_fields = []
+        if next_status == "RETURN_PART_PHOTO":
+            from django.core.files.storage import default_storage
+            return_images = []
+            for field_name, label in return_photo_fields:
+                uploaded = request.FILES.get(field_name)
+                if uploaded:
+                    saved_name = default_storage.save(f"hp_stock_images/{uploaded.name}", uploaded)
+                    setattr(obj, field_name, saved_name)
+                    uploaded_return_fields.append(field_name)
+                    return_images.append({"label": label, "url": default_storage.url(saved_name)})
+            if return_images:
+                entry["return_images"] = return_images
+
         history.append(entry)
         obj.status = next_status
         obj.transition_history = history
@@ -388,6 +415,7 @@ class HPStockItemViewSet(viewsets.ModelViewSet):
             save_fields.append("good_part_image_back")
         if getattr(obj, "return_part_image", None):
             save_fields.append("return_part_image")
+        save_fields.extend(uploaded_return_fields)
         if dc_cut_request_message is not None:
             save_fields.append("dc_cut_request_message")
             
