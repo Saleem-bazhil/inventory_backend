@@ -86,3 +86,24 @@ class HPStockRMAPart(models.Model):
 
     def __str__(self):
         return f"{self.part_number} - {self.description[:30]}"
+
+
+class OpencallPartsCount(models.Model):
+    """Day-by-day, region-wise count of parts calls in the OpenCall record table.
+
+    Computed on the OpenCall side (parts in each daily report per region) and pushed
+    here. Read-only from the frontend's perspective — it just displays the counts.
+    """
+    report_date = models.DateField(db_index=True, verbose_name="Report Date")
+    region = models.CharField(max_length=50, blank=True, default="", db_index=True, verbose_name="Region")
+    count = models.IntegerField(default=0, verbose_name="Parts Call Count")
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["-report_date", "region"]
+        unique_together = ("report_date", "region")
+        verbose_name = "OpenCall Parts Count"
+        verbose_name_plural = "OpenCall Parts Counts"
+
+    def __str__(self):
+        return f"{self.report_date} {self.region}: {self.count}"

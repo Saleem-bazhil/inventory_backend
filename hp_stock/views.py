@@ -3,6 +3,7 @@ from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.decorators import action
 from django.db.models import Count, Q
+from django.db.models.functions import TruncDate
 from django.utils import timezone
 from .models import HPStockItem, HPStockRMAPart
 from .serializers import HPStockItemSerializer, HPStockRMAPartSerializer
@@ -180,6 +181,55 @@ class HPStockItemViewSet(viewsets.ModelViewSet):
             'dc_cut_request_total': dc_cut_request_total,
             'closed_total': closed_total,
             'regions': list(regions)
+        })
+
+    @action(detail=False, methods=['get'])
+    def daily_region_counts(self, request):
+        """Read-only: parts-call count per region, day by day.
+
+        Each HP Stock item is a parts call synced from the opencall system, so
+        grouping items by day + region gives the day-by-day, region-wise count of
+        opencall parts calls. Optional query params: ?region=<name>, ?days=<N>
+        (limit to the last N days). Returns rows plus per-day and per-region totals.
+        """
+        queryset = self.get_queryset()
+
+        region = request.query_params.get('region')
+        if region:
+            queryset = queryset.filter(region=region)
+
+        days = request.query_params.get('days')
+        if days:
+            try:
+                since = timezone.now() - timedelta(days=int(days))
+                queryset = queryset.filter(created_at__gte=since)
+            except (TypeError, ValueError):
+                pass
+
+        rows = list(
+            queryset
+            .annotate(day=TruncDate('created_at'))
+            .values('day', 'region')
+            .annotate(count=Count('id'))
+            .order_by('-day', 'region')
+        )
+
+        # Convenience roll-ups so the frontend can render a matrix without re-scanning.
+        region_totals = {}
+        day_totals = {}
+        for r in rows:
+            reg = r['region'] or 'unknown'
+            day = r['day'].isoformat() if r['day'] else None
+            r['day'] = day
+            region_totals[reg] = region_totals.get(reg, 0) + r['count']
+            if day:
+                day_totals[day] = day_totals.get(day, 0) + r['count']
+
+        return Response({
+            'rows': rows,
+            'region_totals': region_totals,
+            'day_totals': day_totals,
+            'total': sum(r['count'] for r in rows),
         })
 
     def perform_create(self, serializer):
