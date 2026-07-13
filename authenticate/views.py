@@ -237,6 +237,7 @@ class SubAdminListCreateView(APIView):
                 "region": u.userprofile.region,
                 "region_display": u.userprofile.get_region_display() if u.userprofile.region else "",
                 "is_active": u.is_active,
+                "allowed_sections": u.userprofile.allowed_sections,
             }
             for u in users
         ]
@@ -257,6 +258,7 @@ class SubAdminListCreateView(APIView):
                 "region": profile.region,
                 "region_display": profile.get_region_display() if profile.region else "",
                 "is_active": user.is_active,
+                "allowed_sections": profile.allowed_sections,
             },
             status=status.HTTP_201_CREATED,
         )
@@ -322,7 +324,7 @@ class ManagerDetailView(APIView):
         user = self._get_user(pk)
         if not user:
             return Response({"detail": "Manager not found."}, status=status.HTTP_404_NOT_FOUND)
-        serializer = ManagerSerializer(data=request.data, partial=True)
+        serializer = ManagerSerializer(instance=user, data=request.data, partial=True)
         serializer.is_valid(raise_exception=True)
         d = serializer.validated_data
         if "username" in d:
@@ -385,7 +387,7 @@ class SubAdminDetailView(APIView):
         user = self._get_user(pk)
         if not user:
             return Response({"detail": "Sub-admin not found."}, status=status.HTTP_404_NOT_FOUND)
-        serializer = SubAdminSerializer(data=request.data, partial=True)
+        serializer = SubAdminSerializer(instance=user, data=request.data, partial=True)
         serializer.is_valid(raise_exception=True)
         d = serializer.validated_data
         if "username" in d:
@@ -399,9 +401,15 @@ class SubAdminDetailView(APIView):
         if "password" in d:
             user.set_password(d["password"])
         user.save()
+        profile_fields = []
         if "region" in d:
             user.userprofile.region = d["region"]
-            user.userprofile.save(update_fields=["region"])
+            profile_fields.append("region")
+        if "allowed_sections" in d:
+            user.userprofile.allowed_sections = d["allowed_sections"]
+            profile_fields.append("allowed_sections")
+        if profile_fields:
+            user.userprofile.save(update_fields=profile_fields)
         profile = user.userprofile
         return Response({
             "id": user.id,
@@ -412,6 +420,7 @@ class SubAdminDetailView(APIView):
             "region": profile.region,
             "region_display": profile.get_region_display() if profile.region else "",
             "is_active": user.is_active,
+            "allowed_sections": profile.allowed_sections,
         })
 
     def delete(self, request, pk):

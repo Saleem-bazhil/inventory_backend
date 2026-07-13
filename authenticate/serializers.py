@@ -113,14 +113,26 @@ class SubAdminSerializer(serializers.Serializer):
     first_name = serializers.CharField(required=False, default="", allow_blank=True)
     last_name = serializers.CharField(required=False, default="", allow_blank=True)
     region = serializers.ChoiceField(choices=UserProfile.REGION_CHOICES)
+    allowed_sections = serializers.ListField(
+        child=serializers.CharField(),
+        required=False,
+        default=list,
+    )
 
     def validate_username(self, value):
-        if self.instance is None and User.objects.filter(username=value).exists():
+        # On update the user keeps their own username, so exclude themselves from
+        # the collision check — otherwise every edit that leaves the username
+        # untouched would be rejected as a duplicate.
+        qs = User.objects.filter(username=value)
+        if self.instance is not None:
+            qs = qs.exclude(pk=self.instance.pk)
+        if qs.exists():
             raise serializers.ValidationError("A user with this username already exists.")
         return value
 
     def create(self, validated_data):
         region = validated_data.pop("region")
+        allowed_sections = validated_data.pop("allowed_sections", [])
         password = validated_data.pop("password", None)
         if not password:
             raise serializers.ValidationError({"password": "Password is required when creating a sub-admin."})
@@ -128,7 +140,8 @@ class SubAdminSerializer(serializers.Serializer):
         profile = ensure_user_profile(user)
         profile.role = UserProfile.SUB_ADMIN
         profile.region = region
-        profile.save(update_fields=["role", "region"])
+        profile.allowed_sections = allowed_sections
+        profile.save(update_fields=["role", "region", "allowed_sections"])
         return user
 
 
@@ -153,7 +166,12 @@ class ManagerSerializer(serializers.Serializer):
     )
 
     def validate_username(self, value):
-        if self.instance is None and User.objects.filter(username=value).exists():
+        # See SubAdminSerializer.validate_username — the user must not collide with
+        # themselves when their own username is submitted unchanged on update.
+        qs = User.objects.filter(username=value)
+        if self.instance is not None:
+            qs = qs.exclude(pk=self.instance.pk)
+        if qs.exists():
             raise serializers.ValidationError("A user with this username already exists.")
         return value
 
