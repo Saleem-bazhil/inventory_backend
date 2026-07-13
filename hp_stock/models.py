@@ -118,3 +118,22 @@ class OpencallPartsCount(models.Model):
 
     def __str__(self):
         return f"{self.report_date} {self.region}: {self.count}"
+
+
+class OpencallActivePartCase(models.Model):
+    """Case IDs of OpenCall's "Active Part Cases" for a report date (pushed from OpenCall).
+
+    Used to scope the HP Stock part-value bands to exactly the cases OpenCall currently
+    counts as active part cases — the same set behind the region cards' Active number.
+    """
+    report_date = models.DateField(db_index=True, verbose_name="Report Date")
+    case_id = models.CharField(max_length=100, db_index=True, verbose_name="Case ID")
+    region = models.CharField(max_length=50, blank=True, default="", verbose_name="Region")
+
+    class Meta:
+        unique_together = ("report_date", "case_id")
+        verbose_name = "OpenCall Active Part Case"
+        verbose_name_plural = "OpenCall Active Part Cases"
+
+    def __str__(self):
+        return f"{self.report_date} {self.case_id} ({self.region})"

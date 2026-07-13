@@ -2,10 +2,10 @@ from rest_framework import viewsets
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.decorators import action
-from django.db.models import Count, Q
+from django.db.models import Count, Q, Max, OuterRef, Subquery, DecimalField
 from django.db.models.functions import TruncDate
 from django.utils import timezone
-from .models import HPStockItem, HPStockRMAPart, OpencallPartsCount
+from .models import HPStockItem, HPStockRMAPart, OpencallPartsCount, OpencallActivePartCase
 from .serializers import HPStockItemSerializer, HPStockRMAPartSerializer, OpencallPartsCountSerializer
 
 from rest_framework.pagination import PageNumberPagination
@@ -32,6 +32,74 @@ class CustomPageNumberPagination(PageNumberPagination):
             'per_page': per_page,
             'pages': pages
         })
+
+# The HP Stock workflow in order. WORK_STATUS branches into UNUSED_RETURN /
+# DEFECTIVE_RETURN / DOA, which all rejoin at HANDOVER, so they share one step.
+WORKFLOW_STAGES = [
+    ['PENDING'],
+    ['STOCK_CHECK'],
+    ['GOOD_PART_PHOTO'],
+    ['ISSUED'],
+    ['WORK_STATUS'],
+    ['UNUSED_RETURN', 'DEFECTIVE_RETURN', 'DOA'],
+    ['HANDOVER'],
+    ['RETURN_PART_PHOTO'],
+    ['DC_CUT_REQUEST'],
+    ['CLOSED'],
+]
+
+# For each status, every status at or past it in the workflow. A case sitting on
+# one of these has completed that stage, which is how "how many cases did X" is
+# counted (the workflow only moves forward).
+STAGES_AT_OR_PAST = {
+    status: [s for step in WORKFLOW_STAGES[idx:] for s in step]
+    for idx, step in enumerate(WORKFLOW_STAGES)
+    for status in step
+}
+
+
+# Price bands for a part, keyed by the value the frontend sends/receives. Price
+# is not a column on HPStockItem — it is looked up from the RMA catalog by
+# good_part_number — so band filters annotate the price in via a subquery.
+# Bounds are inclusive on the upper end (<= 5000 is Low, and so on).
+PART_VALUE_BANDS = {
+    'LOW': (None, 5000),
+    'MID': (5000, 10000),
+    'HIGH': (10000, 15000),
+    'CRITICAL': (15000, None),
+}
+
+
+def annotate_part_price(queryset):
+    """Annotate `part_price` from the RMA catalog (null when there is no match)."""
+    price_subquery = (
+        HPStockRMAPart.objects
+        .filter(part_number=OuterRef('good_part_number'))
+        .values('price')[:1]
+    )
+    return queryset.annotate(
+        part_price=Subquery(price_subquery, output_field=DecimalField(max_digits=12, decimal_places=2))
+    )
+
+
+def opencall_active_case_ids():
+    """Case ids of OpenCall's current "Active Part Cases" (latest report date pushed)."""
+    latest = OpencallActivePartCase.objects.aggregate(d=Max('report_date'))['d']
+    if not latest:
+        return None
+    return OpencallActivePartCase.objects.filter(report_date=latest).values_list('case_id', flat=True)
+
+
+def part_value_band_q(band: str) -> Q:
+    """Q object selecting rows whose annotated `part_price` falls in `band`."""
+    low, high = PART_VALUE_BANDS[band]
+    q = Q(part_price__isnull=False)
+    if low is not None:
+        q &= Q(part_price__gt=low)
+    if high is not None:
+        q &= Q(part_price__lte=high)
+    return q
+
 
 def _clean_phone(phone: str) -> str:
     """Strip non-digits and remove leading +91 or 91 to get 10-digit Indian number."""
@@ -87,6 +155,8 @@ class HPStockItemViewSet(viewsets.ModelViewSet):
         date_param = self.request.query_params.get('date', '').strip()
         warranty_trade_param = self.request.query_params.get('warranty_trade', '').strip()
         part_shipment_status_param = self.request.query_params.get('part_shipment_status', '').strip()
+        stage_done_param = self.request.query_params.get('stage_done', '').strip().upper()
+        value_band_param = self.request.query_params.get('value_band', '').strip().upper()
 
         if region and region != 'all':
             # Non-admins should not be able to bypass their region check
@@ -107,6 +177,17 @@ class HPStockItemViewSet(viewsets.ModelViewSet):
                 queryset = queryset.filter(status='DC_CUT_REQUEST')
             elif is_closed_param == 'false':
                 queryset = queryset.exclude(status__in=['CLOSED', 'DC_CUT_REQUEST'])
+
+        # Cases that have completed a given stage — the counterpart of the stage
+        # counts in summary(), so clicking a count card lists exactly those cases.
+        if stage_done_param in STAGES_AT_OR_PAST:
+            queryset = queryset.filter(status__in=STAGES_AT_OR_PAST[stage_done_param])
+
+        # Part value band — derived from price, so it stays super-admin-only.
+        if value_band_param in PART_VALUE_BANDS and role == 'super_admin':
+            active_ids = opencall_active_case_ids()
+            queryset = queryset.filter(case_id__in=active_ids) if active_ids is not None else queryset.none()
+            queryset = annotate_part_price(queryset).filter(part_value_band_q(value_band_param))
 
         if date_param:
             queryset = queryset.filter(
@@ -169,17 +250,55 @@ class HPStockItemViewSet(viewsets.ModelViewSet):
         active_total = queryset.exclude(status__in=['CLOSED', 'DC_CUT_REQUEST']).count()
         dc_cut_request_total = queryset.filter(status='DC_CUT_REQUEST').count()
         closed_total = queryset.filter(status='CLOSED').count()
+
+        # Cases that have completed each workflow stage. The workflow is strictly
+        # linear (WORK_STATUS branches to UNUSED/DEFECTIVE/DOA, all rejoining at
+        # HANDOVER), so a case that sits at or past a stage has completed it.
+        good_part_photo_done = STAGES_AT_OR_PAST['GOOD_PART_PHOTO']
+        issued_done = STAGES_AT_OR_PAST['ISSUED']
+        handover_done = STAGES_AT_OR_PAST['HANDOVER']
+        return_part_photo_done = STAGES_AT_OR_PAST['RETURN_PART_PHOTO']
+
+        good_part_photo_total = queryset.filter(status__in=good_part_photo_done).count()
+        return_part_photo_total = queryset.filter(status__in=return_part_photo_done).count()
+        issued_total = queryset.filter(status__in=issued_done).count()
+        handover_total = queryset.filter(status__in=handover_done).count()
+
+        # Part value counts are derived from price, which is super-admin-only, so
+        # they are omitted entirely for everyone else.
+        part_value_totals = {}
+        profile = getattr(request.user, 'userprofile', None)
+        if getattr(profile, 'role', '') == 'super_admin':
+            # Part-value bands cover only OpenCall's current Active Part Cases �
+            # the same set behind the region cards' Active number.
+            active_ids = opencall_active_case_ids()
+            scoped = queryset.filter(case_id__in=active_ids) if active_ids is not None else queryset.none()
+            priced = annotate_part_price(scoped)
+            part_value_totals = {
+                f'part_value_{band.lower()}_total': priced.filter(part_value_band_q(band)).count()
+                for band in PART_VALUE_BANDS
+            }
+
         regions = queryset.values('region').annotate(
             total=Count('id'),
             active=Count('id', filter=~Q(status__in=['CLOSED', 'DC_CUT_REQUEST'])),
             dc_cut_request=Count('id', filter=Q(status='DC_CUT_REQUEST')),
-            closed=Count('id', filter=Q(status='CLOSED'))
+            closed=Count('id', filter=Q(status='CLOSED')),
+            good_part_photo=Count('id', filter=Q(status__in=good_part_photo_done)),
+            return_part_photo=Count('id', filter=Q(status__in=return_part_photo_done)),
+            issued=Count('id', filter=Q(status__in=issued_done)),
+            handover=Count('id', filter=Q(status__in=handover_done)),
         ).order_by('-total')
         return Response({
             'total': total,
             'active_total': active_total,
             'dc_cut_request_total': dc_cut_request_total,
             'closed_total': closed_total,
+            'good_part_photo_total': good_part_photo_total,
+            'return_part_photo_total': return_part_photo_total,
+            'issued_total': issued_total,
+            'handover_total': handover_total,
+            **part_value_totals,
             'regions': list(regions)
         })
 
@@ -654,6 +773,27 @@ class OpencallPartsCountViewSet(viewsets.ModelViewSet):
     queryset = OpencallPartsCount.objects.all().order_by('-report_date', 'region')
     serializer_class = OpencallPartsCountSerializer
     pagination_class = None
+
+    @action(detail=False, methods=['post'])
+    def bulk_replace_active_cases(self, request):
+        """OpenCall pushes the full active part-case id list for a report date."""
+        payload = request.data
+        rows = payload if isinstance(payload, list) else payload.get('rows', [])
+        if not rows:
+            return Response({'written': 0})
+        report_date = rows[0].get('report_date')
+        if not report_date:
+            return Response({'written': 0})
+        OpencallActivePartCase.objects.filter(report_date=report_date).delete()
+        OpencallActivePartCase.objects.bulk_create([
+            OpencallActivePartCase(
+                report_date=report_date,
+                case_id=str(r.get('case_id') or ''),
+                region=(r.get('region') or ''),
+            )
+            for r in rows if r.get('case_id')
+        ], ignore_conflicts=True)
+        return Response({'written': len(rows)})
 
     @action(detail=False, methods=['post'])
     def bulk_upsert(self, request):

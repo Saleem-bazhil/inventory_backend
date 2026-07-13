@@ -11,7 +11,22 @@ class HPStockItemSerializer(serializers.ModelSerializer):
         fields = '__all__'
         read_only_fields = ('created_by', 'created_at', 'updated_at', 'transition_history')
 
+    def _is_super_admin(self):
+        request = self.context.get('request')
+        user = getattr(request, 'user', None)
+        profile = getattr(user, 'userprofile', None)
+        return getattr(profile, 'role', '') == 'super_admin'
+
+    def to_representation(self, instance):
+        data = super().to_representation(instance)
+        # Price is super-admin-only, so it must not reach anyone else's payload.
+        if not self._is_super_admin():
+            data.pop('price', None)
+        return data
+
     def get_price(self, obj):
+        if not self._is_super_admin():
+            return None
         good_part = (obj.good_part_number or '').strip()
         if not good_part:
             return None
