@@ -1,5 +1,5 @@
 from rest_framework import serializers
-from .models import HPStockItem, HPStockRMAPart
+from .models import HPStockItem, HPStockRMAPart, OpencallPartsCount
 
 class HPStockItemSerializer(serializers.ModelSerializer):
     created_by_name = serializers.CharField(source='created_by.get_full_name', read_only=True)
@@ -34,3 +34,9 @@ class HPStockRMAPartSerializer(serializers.ModelSerializer):
     class Meta:
         model = HPStockRMAPart
         fields = '__all__'
+
+
+class OpencallPartsCountSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = OpencallPartsCount
+        fields = ('id', 'report_date', 'region', 'count', 'updated_at')

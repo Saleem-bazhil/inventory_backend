@@ -5,8 +5,8 @@ from rest_framework.decorators import action
 from django.db.models import Count, Q
 from django.db.models.functions import TruncDate
 from django.utils import timezone
-from .models import HPStockItem, HPStockRMAPart
-from .serializers import HPStockItemSerializer, HPStockRMAPartSerializer
+from .models import HPStockItem, HPStockRMAPart, OpencallPartsCount
+from .serializers import HPStockItemSerializer, HPStockRMAPartSerializer, OpencallPartsCountSerializer
 
 from rest_framework.pagination import PageNumberPagination
 import math
@@ -647,3 +647,27 @@ class HPStockRMAPartViewSet(viewsets.ModelViewSet):
             "skipped_empty": skipped_empty,
             "errors": errors
         })
+
+
+class OpencallPartsCountViewSet(viewsets.ModelViewSet):
+    """Region-wise OpenCall "Active Part Cases" count, pushed from OpenCall. Read-only in UI."""
+    queryset = OpencallPartsCount.objects.all().order_by('-report_date', 'region')
+    serializer_class = OpencallPartsCountSerializer
+    pagination_class = None
+
+    @action(detail=False, methods=['post'])
+    def bulk_upsert(self, request):
+        payload = request.data
+        rows = payload if isinstance(payload, list) else payload.get('rows', [])
+        written = 0
+        for r in rows:
+            report_date = r.get('report_date')
+            if not report_date:
+                continue
+            OpencallPartsCount.objects.update_or_create(
+                report_date=report_date,
+                region=(r.get('region') or ''),
+                defaults={'count': r.get('count') or 0},
+            )
+            written += 1
+        return Response({'written': written})
