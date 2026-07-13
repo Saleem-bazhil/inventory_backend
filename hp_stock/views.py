@@ -269,7 +269,7 @@ class HPStockItemViewSet(viewsets.ModelViewSet):
         part_value_totals = {}
         profile = getattr(request.user, 'userprofile', None)
         if getattr(profile, 'role', '') == 'super_admin':
-            # Part-value bands cover only OpenCall's current Active Part Cases —
+            # Part-value bands cover only OpenCall's current Active Part Cases ï¿½
             # the same set behind the region cards' Active number.
             active_ids = opencall_active_case_ids()
             scoped = queryset.filter(case_id__in=active_ids) if active_ids is not None else queryset.none()
@@ -301,6 +301,27 @@ class HPStockItemViewSet(viewsets.ModelViewSet):
             **part_value_totals,
             'regions': list(regions)
         })
+
+    @action(detail=False, methods=['get'])
+    def dc_cut_value_counts(self, request):
+        """Part value band counts across DC Cut requests only.
+
+        Backs the value cards above the DC Cut approval table, so the counts cover
+        exactly the cases listed there. Derived from price, so super-admin only.
+        Honours ?region=<name> like the list endpoint does.
+        """
+        profile = getattr(request.user, 'userprofile', None)
+        if getattr(profile, 'role', '') != 'super_admin':
+            return Response({})
+
+        dc_requests = self.get_queryset().filter(status='DC_CUT_REQUEST')
+        priced = annotate_part_price(dc_requests)
+        counts = {
+            f'part_value_{band.lower()}_total': priced.filter(part_value_band_q(band)).count()
+            for band in PART_VALUE_BANDS
+        }
+        counts['total'] = dc_requests.count()
+        return Response(counts)
 
     @action(detail=False, methods=['get'])
     def daily_region_counts(self, request):
