@@ -101,6 +101,31 @@ def part_value_band_q(band: str) -> Q:
     return q
 
 
+def _upload_images_parallel(files):
+    """Save each uploaded file to storage, all at once, preserving input order.
+
+    A transition can carry up to ten photos. Against S3 each save is a network
+    round trip, so doing them one after another made "Confirm Transition" take as
+    long as the sum of every upload. They are independent, so they go out together
+    and the call now takes about as long as the slowest single upload.
+
+    Returns [(saved_name, url), ...] — assign saved_name to the FileField (never
+    the file object, which would upload it a second time on save()).
+    """
+    from concurrent.futures import ThreadPoolExecutor
+    from django.core.files.storage import default_storage
+
+    def _save(uploaded):
+        saved_name = default_storage.save(f"hp_stock_images/{uploaded.name}", uploaded)
+        return saved_name, default_storage.url(saved_name)
+
+    if len(files) == 1:
+        return [_save(files[0])]
+
+    with ThreadPoolExecutor(max_workers=min(len(files), 8)) as pool:
+        return list(pool.map(_save, files))
+
+
 def _clean_phone(phone: str) -> str:
     """Strip non-digits and remove leading +91 or 91 to get 10-digit Indian number."""
     digits = re.sub(r"\D", "", phone)
@@ -490,27 +515,28 @@ class HPStockItemViewSet(viewsets.ModelViewSet):
         if next_status in ["ISSUED", "HANDOVER"] and getattr(obj, "engineer_phone", None):
             entry["engineer_phone"] = obj.engineer_phone
 
+        # Every photo on this request, uploaded to storage once, in parallel.
+        #
+        # Two things used to make this slow on production (where storage is S3):
+        # each upload went out one after another, and assigning the *file object*
+        # to a FileField made obj.save() upload it a second time. Assigning the
+        # saved name instead just records the path, so each file crosses the wire
+        # once.
+        pending_uploads = []  # (field_name or None, history_key, label, file)
+
         good_part_image = request.FILES.get("good_part_image")
         if good_part_image:
-            from django.core.files.storage import default_storage
-            file_name = default_storage.save(f"hp_stock_images/{good_part_image.name}", good_part_image)
-            image_url = default_storage.url(file_name)
-            entry["image"] = image_url
-            
+            field = None
             if next_status == "GOOD_PART_PHOTO":
-                obj.good_part_image = good_part_image
+                field = "good_part_image"
             elif next_status == "RETURN_PART_PHOTO":
-                obj.return_part_image = good_part_image
+                field = "return_part_image"
+            pending_uploads.append((field, "image", None, good_part_image))
 
         good_part_image_back = request.FILES.get("good_part_image_back")
         if good_part_image_back:
-            from django.core.files.storage import default_storage
-            file_name = default_storage.save(f"hp_stock_images/{good_part_image_back.name}", good_part_image_back)
-            image_url_back = default_storage.url(file_name)
-            entry["image_back"] = image_url_back
-            
-            if next_status == "GOOD_PART_PHOTO":
-                obj.good_part_image_back = good_part_image_back
+            field = "good_part_image_back" if next_status == "GOOD_PART_PHOTO" else None
+            pending_uploads.append((field, "image_back", None, good_part_image_back))
 
         # Return part photo categories (all optional, only on RETURN_PART_PHOTO)
         return_photo_fields = [
@@ -525,17 +551,28 @@ class HPStockItemViewSet(viewsets.ModelViewSet):
             ("return_option_image_2", "Option Image 2"),
             ("return_option_image_3", "Option Image 3"),
         ]
-        uploaded_return_fields = []
         if next_status == "RETURN_PART_PHOTO":
-            from django.core.files.storage import default_storage
-            return_images = []
             for field_name, label in return_photo_fields:
                 uploaded = request.FILES.get(field_name)
                 if uploaded:
-                    saved_name = default_storage.save(f"hp_stock_images/{uploaded.name}", uploaded)
+                    pending_uploads.append((field_name, "return_images", label, uploaded))
+
+        uploaded_return_fields = []
+        if pending_uploads:
+            results = _upload_images_parallel([f for _, _, _, f in pending_uploads])
+
+            return_images = []
+            for (field_name, history_key, label, _), (saved_name, url) in zip(pending_uploads, results):
+                if field_name:
+                    # The saved name, not the file object — assigning the object would
+                    # make obj.save() re-upload it.
                     setattr(obj, field_name, saved_name)
-                    uploaded_return_fields.append(field_name)
-                    return_images.append({"label": label, "url": default_storage.url(saved_name)})
+                    if field_name.startswith("return_") and field_name != "return_part_image":
+                        uploaded_return_fields.append(field_name)
+                if history_key == "return_images":
+                    return_images.append({"label": label, "url": url})
+                else:
+                    entry[history_key] = url
             if return_images:
                 entry["return_images"] = return_images
 
