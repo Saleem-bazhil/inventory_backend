@@ -238,6 +238,7 @@ class HPStockItemViewSet(viewsets.ModelViewSet):
                 Q(good_part_number__icontains=search) |
                 Q(part_order_number__icontains=search) |
                 Q(so_number__icontains=search) |
+                Q(sn_number__icontains=search) |
                 Q(engineer_name__icontains=search)
             )
 

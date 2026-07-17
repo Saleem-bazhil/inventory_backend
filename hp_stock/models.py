@@ -12,6 +12,7 @@ class HPStockItem(models.Model):
     good_part_number = models.CharField(max_length=100, blank=True, default="", verbose_name="Good Part Number")
     part_order_number = models.CharField(max_length=100, blank=True, default="", verbose_name="Part Order Number")
     so_number = models.CharField(max_length=100, blank=True, default="", verbose_name="SO Number")
+    sn_number = models.CharField(max_length=100, blank=True, default="", verbose_name="SN Number")
     warranty_trade = models.CharField(max_length=50, blank=True, default="", db_index=True, verbose_name="Warranty/Trade")
     part_shipment_status = models.CharField(max_length=100, blank=True, default="", db_index=True, verbose_name="Part Shipment Status")
     good_part_image = models.FileField(upload_to="hp_stock_images/", blank=True, null=True, verbose_name="Good Part Photo")
