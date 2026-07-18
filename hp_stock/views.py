@@ -58,6 +58,25 @@ STAGES_AT_OR_PAST = {
 }
 
 
+def stage_reached_on_date(history, target_status, date_str):
+    """True if this transition_history reached `target_status` on the date (YYYY-MM-DD).
+
+    `history` is a JSON list of {to_status, timestamp, ...}. The timestamp is an ISO
+    datetime recorded when the transition happened, so its date part is compared
+    against date_str. Used to count, per calendar day, how many cases reached a given
+    workflow stage — as opposed to how many currently sit at or past it. A stage
+    reached more than once on the same day still counts as one.
+    """
+    for entry in (history or []):
+        if entry.get('to_status') != target_status:
+            continue
+        ts = entry.get('timestamp') or ''
+        # ISO timestamps start with 'YYYY-MM-DD'; compare just that prefix.
+        if ts[:10] == date_str:
+            return True
+    return False
+
+
 # Price bands for a part, keyed by the value the frontend sends/receives. Price
 # is not a column on HPStockItem — it is looked up from the RMA catalog by
 # good_part_number — so band filters annotate the price in via a subquery.
@@ -214,7 +233,11 @@ class HPStockItemViewSet(viewsets.ModelViewSet):
             queryset = queryset.filter(case_id__in=active_ids) if active_ids is not None else queryset.none()
             queryset = annotate_part_price(queryset).filter(part_value_band_q(value_band_param))
 
-        if date_param:
+        # In the list, ?date= means "cases whose case was created on this day". The
+        # summary uses ?date= differently — "cases that reached a stage on this day"
+        # (counted from transition_history inside summary()), so it must NOT be
+        # narrowed to the creation date here or those transitions get filtered out.
+        if date_param and self.action != 'summary':
             queryset = queryset.filter(
                 Q(case_created_time__date=date_param) |
                 Q(case_created_time__isnull=True, created_at__date=date_param)
@@ -285,10 +308,46 @@ class HPStockItemViewSet(viewsets.ModelViewSet):
         handover_done = STAGES_AT_OR_PAST['HANDOVER']
         return_part_photo_done = STAGES_AT_OR_PAST['RETURN_PART_PHOTO']
 
-        good_part_photo_total = queryset.filter(status__in=good_part_photo_done).count()
-        return_part_photo_total = queryset.filter(status__in=return_part_photo_done).count()
-        issued_total = queryset.filter(status__in=issued_done).count()
-        handover_total = queryset.filter(status__in=handover_done).count()
+        # A date filter changes what the four stage cards mean: instead of "how many
+        # cases sit at or past this stage" (all-time, status-based), they become "how
+        # many cases transitioned INTO this stage on this calendar day" — read from
+        # each item's transition_history timestamps. Without a date, the original
+        # status-based counts are used unchanged.
+        date_param = request.query_params.get('date', '').strip()
+        STAGE_CARDS = [
+            ('good_part_photo', 'GOOD_PART_PHOTO', good_part_photo_done),
+            ('return_part_photo', 'RETURN_PART_PHOTO', return_part_photo_done),
+            ('issued', 'ISSUED', issued_done),
+            ('handover', 'HANDOVER', handover_done),
+        ]
+
+        if date_param:
+            # Pull only the history (small JSON) for the rows in scope, then count in
+            # Python — JSONField can't be filtered on nested timestamp dates portably
+            # (sqlite dev vs postgres prod). region is fetched too for the breakdown.
+            history_rows = list(queryset.values('region', 'transition_history'))
+
+            stage_totals = {}
+            region_stage = {}  # region -> {key: count}
+            for key, target, _done in STAGE_CARDS:
+                total_for_stage = 0
+                for r in history_rows:
+                    if stage_reached_on_date(r['transition_history'], target, date_param):
+                        total_for_stage += 1
+                        reg = r['region'] or ''
+                        region_stage.setdefault(reg, {})
+                        region_stage[reg][key] = region_stage[reg].get(key, 0) + 1
+                stage_totals[key] = total_for_stage
+
+            good_part_photo_total = stage_totals['good_part_photo']
+            return_part_photo_total = stage_totals['return_part_photo']
+            issued_total = stage_totals['issued']
+            handover_total = stage_totals['handover']
+        else:
+            good_part_photo_total = queryset.filter(status__in=good_part_photo_done).count()
+            return_part_photo_total = queryset.filter(status__in=return_part_photo_done).count()
+            issued_total = queryset.filter(status__in=issued_done).count()
+            handover_total = queryset.filter(status__in=handover_done).count()
 
         # Part value counts are derived from price, which is super-admin-only, so
         # they are omitted entirely for everyone else.
@@ -305,7 +364,7 @@ class HPStockItemViewSet(viewsets.ModelViewSet):
                 for band in PART_VALUE_BANDS
             }
 
-        regions = queryset.values('region').annotate(
+        regions = list(queryset.values('region').annotate(
             total=Count('id'),
             active=Count('id', filter=~Q(status__in=['CLOSED', 'DC_CUT_REQUEST'])),
             dc_cut_request=Count('id', filter=Q(status='DC_CUT_REQUEST')),
@@ -314,7 +373,17 @@ class HPStockItemViewSet(viewsets.ModelViewSet):
             return_part_photo=Count('id', filter=Q(status__in=return_part_photo_done)),
             issued=Count('id', filter=Q(status__in=issued_done)),
             handover=Count('id', filter=Q(status__in=handover_done)),
-        ).order_by('-total')
+        ).order_by('-total'))
+
+        # With a date filter on, the four stage counts are day-based (from history),
+        # so overwrite the per-region stage numbers with the day-based tallies.
+        if date_param:
+            for row in regions:
+                by_stage = region_stage.get(row.get('region') or '', {})
+                row['good_part_photo'] = by_stage.get('good_part_photo', 0)
+                row['return_part_photo'] = by_stage.get('return_part_photo', 0)
+                row['issued'] = by_stage.get('issued', 0)
+                row['handover'] = by_stage.get('handover', 0)
         return Response({
             'total': total,
             'active_total': active_total,
@@ -325,7 +394,7 @@ class HPStockItemViewSet(viewsets.ModelViewSet):
             'issued_total': issued_total,
             'handover_total': handover_total,
             **part_value_totals,
-            'regions': list(regions)
+            'regions': regions
         })
 
     @action(detail=False, methods=['get'])
