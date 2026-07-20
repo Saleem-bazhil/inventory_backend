@@ -200,6 +200,10 @@ class HPStockItemViewSet(viewsets.ModelViewSet):
         warranty_trade_param = self.request.query_params.get('warranty_trade', '').strip()
         part_shipment_status_param = self.request.query_params.get('part_shipment_status', '').strip()
         stage_done_param = self.request.query_params.get('stage_done', '').strip().upper()
+        # Optional date (YYYY-MM-DD) pairing with stage_done: list exactly the cases
+        # that reached that stage on that day (matches a date-scoped count card), read
+        # from transition_history rather than current status.
+        stage_on_date_param = self.request.query_params.get('stage_on_date', '').strip()
         value_band_param = self.request.query_params.get('value_band', '').strip().upper()
 
         if region and region != 'all':
@@ -225,7 +229,17 @@ class HPStockItemViewSet(viewsets.ModelViewSet):
         # Cases that have completed a given stage — the counterpart of the stage
         # counts in summary(), so clicking a count card lists exactly those cases.
         if stage_done_param in STAGES_AT_OR_PAST:
-            queryset = queryset.filter(status__in=STAGES_AT_OR_PAST[stage_done_param])
+            if stage_on_date_param:
+                # Date-scoped card: list only cases that reached this exact stage on
+                # that day (from history), so the row set equals the card's number.
+                matching_ids = [
+                    row['id']
+                    for row in queryset.values('id', 'transition_history')
+                    if stage_reached_on_date(row['transition_history'], stage_done_param, stage_on_date_param)
+                ]
+                queryset = queryset.filter(id__in=matching_ids)
+            else:
+                queryset = queryset.filter(status__in=STAGES_AT_OR_PAST[stage_done_param])
 
         # Part value band — derived from price, so it stays super-admin-only.
         if value_band_param in PART_VALUE_BANDS and role == 'super_admin':
@@ -237,7 +251,9 @@ class HPStockItemViewSet(viewsets.ModelViewSet):
         # summary uses ?date= differently — "cases that reached a stage on this day"
         # (counted from transition_history inside summary()), so it must NOT be
         # narrowed to the creation date here or those transitions get filtered out.
-        if date_param and self.action != 'summary':
+        # Likewise skip it when stage_on_date is driving a history-based stage filter,
+        # so a date-scoped card click isn't also narrowed by case-creation date.
+        if date_param and self.action != 'summary' and not stage_on_date_param:
             queryset = queryset.filter(
                 Q(case_created_time__date=date_param) |
                 Q(case_created_time__isnull=True, created_at__date=date_param)
