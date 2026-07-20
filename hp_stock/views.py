@@ -57,6 +57,14 @@ STAGES_AT_OR_PAST = {
     for status in step
 }
 
+# Cases where the engineer has taken the part (reached ISSUED) but has NOT yet handed
+# it back (not reached HANDOVER) — i.e. the part is still out with the engineer, return
+# pending. This is "at or past ISSUED" minus "at or past HANDOVER":
+# {ISSUED, WORK_STATUS, UNUSED_RETURN, DEFECTIVE_RETURN, DOA}.
+PENDING_RETURN_STATUSES = [
+    s for s in STAGES_AT_OR_PAST['ISSUED'] if s not in STAGES_AT_OR_PAST['HANDOVER']
+]
+
 
 def stage_reached_on_date(history, target_status, date_str):
     """True if this transition_history reached `target_status` on the date (YYYY-MM-DD).
@@ -226,9 +234,13 @@ class HPStockItemViewSet(viewsets.ModelViewSet):
             elif is_closed_param == 'false':
                 queryset = queryset.exclude(status__in=['CLOSED', 'DC_CUT_REQUEST'])
 
+        # Pending return: part taken by an engineer but not handed back yet. Its card
+        # is always current-state (date-independent), so it ignores stage_on_date.
+        if stage_done_param == 'PENDING_RETURN':
+            queryset = queryset.filter(status__in=PENDING_RETURN_STATUSES)
         # Cases that have completed a given stage — the counterpart of the stage
         # counts in summary(), so clicking a count card lists exactly those cases.
-        if stage_done_param in STAGES_AT_OR_PAST:
+        elif stage_done_param in STAGES_AT_OR_PAST:
             if stage_on_date_param:
                 # Date-scoped card: list only cases that reached this exact stage on
                 # that day (from history), so the row set equals the card's number.
@@ -365,6 +377,11 @@ class HPStockItemViewSet(viewsets.ModelViewSet):
             issued_total = queryset.filter(status__in=issued_done).count()
             handover_total = queryset.filter(status__in=handover_done).count()
 
+        # Pending return: part taken by an engineer but not yet handed back. This is a
+        # current-state figure ("who is still holding a part right now"), so it stays
+        # status-based even when a date filter reshapes the other stage cards.
+        pending_return_total = queryset.filter(status__in=PENDING_RETURN_STATUSES).count()
+
         # Part value counts are derived from price, which is super-admin-only, so
         # they are omitted entirely for everyone else.
         part_value_totals = {}
@@ -389,6 +406,7 @@ class HPStockItemViewSet(viewsets.ModelViewSet):
             return_part_photo=Count('id', filter=Q(status__in=return_part_photo_done)),
             issued=Count('id', filter=Q(status__in=issued_done)),
             handover=Count('id', filter=Q(status__in=handover_done)),
+            pending_return=Count('id', filter=Q(status__in=PENDING_RETURN_STATUSES)),
         ).order_by('-total'))
 
         # With a date filter on, the four stage counts are day-based (from history),
@@ -409,6 +427,7 @@ class HPStockItemViewSet(viewsets.ModelViewSet):
             'return_part_photo_total': return_part_photo_total,
             'issued_total': issued_total,
             'handover_total': handover_total,
+            'pending_return_total': pending_return_total,
             **part_value_totals,
             'regions': regions
         })
