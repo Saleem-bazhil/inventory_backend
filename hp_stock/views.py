@@ -101,6 +101,42 @@ def part_value_band_q(band: str) -> Q:
     return q
 
 
+def _transitioned_on_date_ids(queryset, to_status, date_str):
+    """IDs of cases whose transition_history records a move INTO `to_status` on
+    `date_str` (YYYY-MM-DD).
+
+    The stage cards mean "how many cases did this action on that day", which is a
+    fact of history — not of when the case row was created — so it must be read from
+    transition_history, whose entries carry `to_status` and an ISO `timestamp`. The
+    UTC date (timestamp[:10]) is compared, matching how the created-date filter
+    compares dates. Evaluated in Python so it works on both SQLite (dev) and
+    Postgres (prod) without JSON-operator differences.
+    """
+    ids = []
+    for pk, history in queryset.values_list('id', 'transition_history'):
+        for entry in (history or []):
+            if entry.get('to_status') == to_status and (entry.get('timestamp') or '')[:10] == date_str:
+                ids.append(pk)
+                break
+    return ids
+
+
+def _stage_counts_on_date(queryset, statuses, date_str):
+    """One-pass count, per status in `statuses`, of cases that moved INTO that status
+    on `date_str`. A case is counted once per status even if it bounced through it
+    more than once. Backs the date-scoped stage cards."""
+    counts = {s: 0 for s in statuses}
+    wanted = set(statuses)
+    for history in queryset.values_list('transition_history', flat=True):
+        seen = set()
+        for entry in (history or []):
+            to_status = entry.get('to_status')
+            if to_status in wanted and to_status not in seen and (entry.get('timestamp') or '')[:10] == date_str:
+                counts[to_status] += 1
+                seen.add(to_status)
+    return counts
+
+
 def _clean_phone(phone: str) -> str:
     """Strip non-digits and remove leading +91 or 91 to get 10-digit Indian number."""
     digits = re.sub(r"\D", "", phone)
@@ -156,6 +192,7 @@ class HPStockItemViewSet(viewsets.ModelViewSet):
         warranty_trade_param = self.request.query_params.get('warranty_trade', '').strip()
         part_shipment_status_param = self.request.query_params.get('part_shipment_status', '').strip()
         stage_done_param = self.request.query_params.get('stage_done', '').strip().upper()
+        stage_on_date_param = self.request.query_params.get('stage_on_date', '').strip()
         value_band_param = self.request.query_params.get('value_band', '').strip().upper()
 
         if region and region != 'all':
@@ -181,7 +218,14 @@ class HPStockItemViewSet(viewsets.ModelViewSet):
         # Cases that have completed a given stage — the counterpart of the stage
         # counts in summary(), so clicking a count card lists exactly those cases.
         if stage_done_param in STAGES_AT_OR_PAST:
-            queryset = queryset.filter(status__in=STAGES_AT_OR_PAST[stage_done_param])
+            if stage_on_date_param:
+                # Date-scoped card: list only cases that transitioned INTO this stage
+                # on that day (from history), so the rows match the day's card count.
+                ids = _transitioned_on_date_ids(queryset, stage_done_param, stage_on_date_param)
+                queryset = queryset.filter(id__in=ids)
+            else:
+                # No date: every case currently at or past the stage (all-time snapshot).
+                queryset = queryset.filter(status__in=STAGES_AT_OR_PAST[stage_done_param])
 
         # Part value band — derived from price, so it stays super-admin-only.
         if value_band_param in PART_VALUE_BANDS and role == 'super_admin':
@@ -189,7 +233,12 @@ class HPStockItemViewSet(viewsets.ModelViewSet):
             queryset = queryset.filter(case_id__in=active_ids) if active_ids is not None else queryset.none()
             queryset = annotate_part_price(queryset).filter(part_value_band_q(value_band_param))
 
-        if date_param:
+        # The table's own date filter scopes rows by when the CASE was created. The
+        # summary must not use it — its stage cards are date-scoped by transition
+        # history instead (see summary()), and its region/DC-Cut/Closed counts are
+        # current-state totals, so creation-date scoping there would wrongly hide
+        # every case created on an earlier day.
+        if date_param and self.action != 'summary':
             queryset = queryset.filter(
                 Q(case_created_time__date=date_param) |
                 Q(case_created_time__isnull=True, created_at__date=date_param)
@@ -259,10 +308,26 @@ class HPStockItemViewSet(viewsets.ModelViewSet):
         handover_done = STAGES_AT_OR_PAST['HANDOVER']
         return_part_photo_done = STAGES_AT_OR_PAST['RETURN_PART_PHOTO']
 
-        good_part_photo_total = queryset.filter(status__in=good_part_photo_done).count()
-        return_part_photo_total = queryset.filter(status__in=return_part_photo_done).count()
-        issued_total = queryset.filter(status__in=issued_done).count()
-        handover_total = queryset.filter(status__in=handover_done).count()
+        # The stage cards answer "how many cases did this action on the chosen day".
+        # With a date, that is counted from transition history (when the move into the
+        # stage happened); without one, it falls back to the all-time snapshot of cases
+        # currently at or past the stage.
+        summary_date = request.query_params.get('date', '').strip()
+        if summary_date:
+            on_date = _stage_counts_on_date(
+                queryset,
+                ['GOOD_PART_PHOTO', 'RETURN_PART_PHOTO', 'ISSUED', 'HANDOVER'],
+                summary_date,
+            )
+            good_part_photo_total = on_date['GOOD_PART_PHOTO']
+            return_part_photo_total = on_date['RETURN_PART_PHOTO']
+            issued_total = on_date['ISSUED']
+            handover_total = on_date['HANDOVER']
+        else:
+            good_part_photo_total = queryset.filter(status__in=good_part_photo_done).count()
+            return_part_photo_total = queryset.filter(status__in=return_part_photo_done).count()
+            issued_total = queryset.filter(status__in=issued_done).count()
+            handover_total = queryset.filter(status__in=handover_done).count()
 
         # Part value counts are derived from price, which is super-admin-only, so
         # they are omitted entirely for everyone else.
