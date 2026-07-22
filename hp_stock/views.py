@@ -13,8 +13,14 @@ import math
 import re
 import random
 import urllib.parse
-from datetime import timedelta
+from datetime import timedelta, datetime, timezone as dt_timezone
 from material.models import OTPVerification
+
+# Transition timestamps are stored in UTC (settings TIME_ZONE=UTC, USE_TZ=True), but
+# the users operate in India and pick dates on an IST calendar. Convert timestamps to
+# IST before taking their date, so an action done at (say) 1 AM IST counts on that IST
+# day rather than the previous UTC day. India has no DST, so a fixed +05:30 is exact.
+IST = dt_timezone(timedelta(hours=5, minutes=30))
 
 class CustomPageNumberPagination(PageNumberPagination):
     page_size = 20
@@ -66,21 +72,37 @@ PENDING_RETURN_STATUSES = [
 ]
 
 
+def _ist_date_str(ts):
+    """The IST calendar date (YYYY-MM-DD) of an ISO timestamp string, or None.
+
+    Timestamps are stored in UTC; the users pick dates in IST, so the timestamp is
+    converted to IST before its date is taken. Falls back to the raw date prefix if
+    the value can't be parsed (so a malformed entry never crashes a count).
+    """
+    if not ts:
+        return None
+    try:
+        dt = datetime.fromisoformat(ts)
+    except (ValueError, TypeError):
+        return ts[:10] or None
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=dt_timezone.utc)
+    return dt.astimezone(IST).date().isoformat()
+
+
 def stage_reached_on_date(history, target_status, date_str):
     """True if this transition_history reached `target_status` on the date (YYYY-MM-DD).
 
-    `history` is a JSON list of {to_status, timestamp, ...}. The timestamp is an ISO
-    datetime recorded when the transition happened, so its date part is compared
-    against date_str. Used to count, per calendar day, how many cases reached a given
-    workflow stage — as opposed to how many currently sit at or past it. A stage
+    `history` is a JSON list of {to_status, timestamp, ...}. The timestamp records when
+    the transition happened; its IST date is compared against date_str (which the user
+    picked on an IST calendar). Used to count, per calendar day, how many cases reached
+    a given workflow stage — as opposed to how many currently sit at or past it. A stage
     reached more than once on the same day still counts as one.
     """
     for entry in (history or []):
         if entry.get('to_status') != target_status:
             continue
-        ts = entry.get('timestamp') or ''
-        # ISO timestamps start with 'YYYY-MM-DD'; compare just that prefix.
-        if ts[:10] == date_str:
+        if _ist_date_str(entry.get('timestamp')) == date_str:
             return True
     return False
 
