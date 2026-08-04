@@ -13,8 +13,14 @@ import math
 import re
 import random
 import urllib.parse
-from datetime import timedelta
+from datetime import timedelta, datetime, timezone as dt_timezone
 from material.models import OTPVerification
+
+# Transition timestamps are stored in UTC (settings TIME_ZONE=UTC, USE_TZ=True), but
+# the users operate in India and pick dates on an IST calendar. Convert timestamps to
+# IST before taking their date, so an action done at (say) 1 AM IST counts on that IST
+# day rather than the previous UTC day. India has no DST, so a fixed +05:30 is exact.
+IST = dt_timezone(timedelta(hours=5, minutes=30))
 
 class CustomPageNumberPagination(PageNumberPagination):
     page_size = 20
@@ -56,6 +62,49 @@ STAGES_AT_OR_PAST = {
     for idx, step in enumerate(WORKFLOW_STAGES)
     for status in step
 }
+
+# Cases where the engineer has taken the part (reached ISSUED) but has NOT yet handed
+# it back (not reached HANDOVER) — i.e. the part is still out with the engineer, return
+# pending. This is "at or past ISSUED" minus "at or past HANDOVER":
+# {ISSUED, WORK_STATUS, UNUSED_RETURN, DEFECTIVE_RETURN, DOA}.
+PENDING_RETURN_STATUSES = [
+    s for s in STAGES_AT_OR_PAST['ISSUED'] if s not in STAGES_AT_OR_PAST['HANDOVER']
+]
+
+
+def _ist_date_str(ts):
+    """The IST calendar date (YYYY-MM-DD) of an ISO timestamp string, or None.
+
+    Timestamps are stored in UTC; the users pick dates in IST, so the timestamp is
+    converted to IST before its date is taken. Falls back to the raw date prefix if
+    the value can't be parsed (so a malformed entry never crashes a count).
+    """
+    if not ts:
+        return None
+    try:
+        dt = datetime.fromisoformat(ts)
+    except (ValueError, TypeError):
+        return ts[:10] or None
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=dt_timezone.utc)
+    return dt.astimezone(IST).date().isoformat()
+
+
+def stage_reached_on_date(history, target_status, date_str):
+    """True if this transition_history reached `target_status` on the date (YYYY-MM-DD).
+
+    `history` is a JSON list of {to_status, timestamp, ...}. The timestamp records when
+    the transition happened; its IST date is compared against date_str (which the user
+    picked on an IST calendar). Used to count, per calendar day, how many cases reached
+    a given workflow stage — as opposed to how many currently sit at or past it. A stage
+    reached more than once on the same day still counts as one.
+    """
+    for entry in (history or []):
+        if entry.get('to_status') != target_status:
+            continue
+        if _ist_date_str(entry.get('timestamp')) == date_str:
+            return True
+    return False
 
 
 # Price bands for a part, keyed by the value the frontend sends/receives. Price
@@ -101,40 +150,29 @@ def part_value_band_q(band: str) -> Q:
     return q
 
 
-def _transitioned_on_date_ids(queryset, to_status, date_str):
-    """IDs of cases whose transition_history records a move INTO `to_status` on
-    `date_str` (YYYY-MM-DD).
+def _upload_images_parallel(files):
+    """Save each uploaded file to storage, all at once, preserving input order.
 
-    The stage cards mean "how many cases did this action on that day", which is a
-    fact of history — not of when the case row was created — so it must be read from
-    transition_history, whose entries carry `to_status` and an ISO `timestamp`. The
-    UTC date (timestamp[:10]) is compared, matching how the created-date filter
-    compares dates. Evaluated in Python so it works on both SQLite (dev) and
-    Postgres (prod) without JSON-operator differences.
+    A transition can carry up to ten photos. Against S3 each save is a network
+    round trip, so doing them one after another made "Confirm Transition" take as
+    long as the sum of every upload. They are independent, so they go out together
+    and the call now takes about as long as the slowest single upload.
+
+    Returns [(saved_name, url), ...] — assign saved_name to the FileField (never
+    the file object, which would upload it a second time on save()).
     """
-    ids = []
-    for pk, history in queryset.values_list('id', 'transition_history'):
-        for entry in (history or []):
-            if entry.get('to_status') == to_status and (entry.get('timestamp') or '')[:10] == date_str:
-                ids.append(pk)
-                break
-    return ids
+    from concurrent.futures import ThreadPoolExecutor
+    from django.core.files.storage import default_storage
 
+    def _save(uploaded):
+        saved_name = default_storage.save(f"hp_stock_images/{uploaded.name}", uploaded)
+        return saved_name, default_storage.url(saved_name)
 
-def _stage_counts_on_date(queryset, statuses, date_str):
-    """One-pass count, per status in `statuses`, of cases that moved INTO that status
-    on `date_str`. A case is counted once per status even if it bounced through it
-    more than once. Backs the date-scoped stage cards."""
-    counts = {s: 0 for s in statuses}
-    wanted = set(statuses)
-    for history in queryset.values_list('transition_history', flat=True):
-        seen = set()
-        for entry in (history or []):
-            to_status = entry.get('to_status')
-            if to_status in wanted and to_status not in seen and (entry.get('timestamp') or '')[:10] == date_str:
-                counts[to_status] += 1
-                seen.add(to_status)
-    return counts
+    if len(files) == 1:
+        return [_save(files[0])]
+
+    with ThreadPoolExecutor(max_workers=min(len(files), 8)) as pool:
+        return list(pool.map(_save, files))
 
 
 def _clean_phone(phone: str) -> str:
@@ -192,6 +230,9 @@ class HPStockItemViewSet(viewsets.ModelViewSet):
         warranty_trade_param = self.request.query_params.get('warranty_trade', '').strip()
         part_shipment_status_param = self.request.query_params.get('part_shipment_status', '').strip()
         stage_done_param = self.request.query_params.get('stage_done', '').strip().upper()
+        # Optional date (YYYY-MM-DD) pairing with stage_done: list exactly the cases
+        # that reached that stage on that day (matches a date-scoped count card), read
+        # from transition_history rather than current status.
         stage_on_date_param = self.request.query_params.get('stage_on_date', '').strip()
         value_band_param = self.request.query_params.get('value_band', '').strip().upper()
 
@@ -215,16 +256,23 @@ class HPStockItemViewSet(viewsets.ModelViewSet):
             elif is_closed_param == 'false':
                 queryset = queryset.exclude(status__in=['CLOSED', 'DC_CUT_REQUEST'])
 
+        # Pending return: part taken by an engineer but not handed back yet. Its card
+        # is always current-state (date-independent), so it ignores stage_on_date.
+        if stage_done_param == 'PENDING_RETURN':
+            queryset = queryset.filter(status__in=PENDING_RETURN_STATUSES)
         # Cases that have completed a given stage — the counterpart of the stage
         # counts in summary(), so clicking a count card lists exactly those cases.
-        if stage_done_param in STAGES_AT_OR_PAST:
+        elif stage_done_param in STAGES_AT_OR_PAST:
             if stage_on_date_param:
-                # Date-scoped card: list only cases that transitioned INTO this stage
-                # on that day (from history), so the rows match the day's card count.
-                ids = _transitioned_on_date_ids(queryset, stage_done_param, stage_on_date_param)
-                queryset = queryset.filter(id__in=ids)
+                # Date-scoped card: list only cases that reached this exact stage on
+                # that day (from history), so the row set equals the card's number.
+                matching_ids = [
+                    row['id']
+                    for row in queryset.values('id', 'transition_history')
+                    if stage_reached_on_date(row['transition_history'], stage_done_param, stage_on_date_param)
+                ]
+                queryset = queryset.filter(id__in=matching_ids)
             else:
-                # No date: every case currently at or past the stage (all-time snapshot).
                 queryset = queryset.filter(status__in=STAGES_AT_OR_PAST[stage_done_param])
 
         # Part value band — derived from price, so it stays super-admin-only.
@@ -233,12 +281,13 @@ class HPStockItemViewSet(viewsets.ModelViewSet):
             queryset = queryset.filter(case_id__in=active_ids) if active_ids is not None else queryset.none()
             queryset = annotate_part_price(queryset).filter(part_value_band_q(value_band_param))
 
-        # The table's own date filter scopes rows by when the CASE was created. The
-        # summary must not use it — its stage cards are date-scoped by transition
-        # history instead (see summary()), and its region/DC-Cut/Closed counts are
-        # current-state totals, so creation-date scoping there would wrongly hide
-        # every case created on an earlier day.
-        if date_param and self.action != 'summary':
+        # In the list, ?date= means "cases whose case was created on this day". The
+        # summary uses ?date= differently — "cases that reached a stage on this day"
+        # (counted from transition_history inside summary()), so it must NOT be
+        # narrowed to the creation date here or those transitions get filtered out.
+        # Likewise skip it when stage_on_date is driving a history-based stage filter,
+        # so a date-scoped card click isn't also narrowed by case-creation date.
+        if date_param and self.action != 'summary' and not stage_on_date_param:
             queryset = queryset.filter(
                 Q(case_created_time__date=date_param) |
                 Q(case_created_time__isnull=True, created_at__date=date_param)
@@ -262,6 +311,7 @@ class HPStockItemViewSet(viewsets.ModelViewSet):
                 Q(good_part_number__icontains=search) |
                 Q(part_order_number__icontains=search) |
                 Q(so_number__icontains=search) |
+                Q(sn_number__icontains=search) |
                 Q(engineer_name__icontains=search)
             )
 
@@ -308,26 +358,51 @@ class HPStockItemViewSet(viewsets.ModelViewSet):
         handover_done = STAGES_AT_OR_PAST['HANDOVER']
         return_part_photo_done = STAGES_AT_OR_PAST['RETURN_PART_PHOTO']
 
-        # The stage cards answer "how many cases did this action on the chosen day".
-        # With a date, that is counted from transition history (when the move into the
-        # stage happened); without one, it falls back to the all-time snapshot of cases
-        # currently at or past the stage.
-        summary_date = request.query_params.get('date', '').strip()
-        if summary_date:
-            on_date = _stage_counts_on_date(
-                queryset,
-                ['GOOD_PART_PHOTO', 'RETURN_PART_PHOTO', 'ISSUED', 'HANDOVER'],
-                summary_date,
-            )
-            good_part_photo_total = on_date['GOOD_PART_PHOTO']
-            return_part_photo_total = on_date['RETURN_PART_PHOTO']
-            issued_total = on_date['ISSUED']
-            handover_total = on_date['HANDOVER']
+        # A date filter changes what the four stage cards mean: instead of "how many
+        # cases sit at or past this stage" (all-time, status-based), they become "how
+        # many cases transitioned INTO this stage on this calendar day" — read from
+        # each item's transition_history timestamps. Without a date, the original
+        # status-based counts are used unchanged.
+        date_param = request.query_params.get('date', '').strip()
+        STAGE_CARDS = [
+            ('good_part_photo', 'GOOD_PART_PHOTO', good_part_photo_done),
+            ('return_part_photo', 'RETURN_PART_PHOTO', return_part_photo_done),
+            ('issued', 'ISSUED', issued_done),
+            ('handover', 'HANDOVER', handover_done),
+        ]
+
+        if date_param:
+            # Pull only the history (small JSON) for the rows in scope, then count in
+            # Python — JSONField can't be filtered on nested timestamp dates portably
+            # (sqlite dev vs postgres prod). region is fetched too for the breakdown.
+            history_rows = list(queryset.values('region', 'transition_history'))
+
+            stage_totals = {}
+            region_stage = {}  # region -> {key: count}
+            for key, target, _done in STAGE_CARDS:
+                total_for_stage = 0
+                for r in history_rows:
+                    if stage_reached_on_date(r['transition_history'], target, date_param):
+                        total_for_stage += 1
+                        reg = r['region'] or ''
+                        region_stage.setdefault(reg, {})
+                        region_stage[reg][key] = region_stage[reg].get(key, 0) + 1
+                stage_totals[key] = total_for_stage
+
+            good_part_photo_total = stage_totals['good_part_photo']
+            return_part_photo_total = stage_totals['return_part_photo']
+            issued_total = stage_totals['issued']
+            handover_total = stage_totals['handover']
         else:
             good_part_photo_total = queryset.filter(status__in=good_part_photo_done).count()
             return_part_photo_total = queryset.filter(status__in=return_part_photo_done).count()
             issued_total = queryset.filter(status__in=issued_done).count()
             handover_total = queryset.filter(status__in=handover_done).count()
+
+        # Pending return: part taken by an engineer but not yet handed back. This is a
+        # current-state figure ("who is still holding a part right now"), so it stays
+        # status-based even when a date filter reshapes the other stage cards.
+        pending_return_total = queryset.filter(status__in=PENDING_RETURN_STATUSES).count()
 
         # Part value counts are derived from price, which is super-admin-only, so
         # they are omitted entirely for everyone else.
@@ -344,7 +419,7 @@ class HPStockItemViewSet(viewsets.ModelViewSet):
                 for band in PART_VALUE_BANDS
             }
 
-        regions = queryset.values('region').annotate(
+        regions = list(queryset.values('region').annotate(
             total=Count('id'),
             active=Count('id', filter=~Q(status__in=['CLOSED', 'DC_CUT_REQUEST'])),
             dc_cut_request=Count('id', filter=Q(status='DC_CUT_REQUEST')),
@@ -353,7 +428,18 @@ class HPStockItemViewSet(viewsets.ModelViewSet):
             return_part_photo=Count('id', filter=Q(status__in=return_part_photo_done)),
             issued=Count('id', filter=Q(status__in=issued_done)),
             handover=Count('id', filter=Q(status__in=handover_done)),
-        ).order_by('-total')
+            pending_return=Count('id', filter=Q(status__in=PENDING_RETURN_STATUSES)),
+        ).order_by('-total'))
+
+        # With a date filter on, the four stage counts are day-based (from history),
+        # so overwrite the per-region stage numbers with the day-based tallies.
+        if date_param:
+            for row in regions:
+                by_stage = region_stage.get(row.get('region') or '', {})
+                row['good_part_photo'] = by_stage.get('good_part_photo', 0)
+                row['return_part_photo'] = by_stage.get('return_part_photo', 0)
+                row['issued'] = by_stage.get('issued', 0)
+                row['handover'] = by_stage.get('handover', 0)
         return Response({
             'total': total,
             'active_total': active_total,
@@ -363,8 +449,9 @@ class HPStockItemViewSet(viewsets.ModelViewSet):
             'return_part_photo_total': return_part_photo_total,
             'issued_total': issued_total,
             'handover_total': handover_total,
+            'pending_return_total': pending_return_total,
             **part_value_totals,
-            'regions': list(regions)
+            'regions': regions
         })
 
     @action(detail=False, methods=['get'])
@@ -555,27 +642,28 @@ class HPStockItemViewSet(viewsets.ModelViewSet):
         if next_status in ["ISSUED", "HANDOVER"] and getattr(obj, "engineer_phone", None):
             entry["engineer_phone"] = obj.engineer_phone
 
+        # Every photo on this request, uploaded to storage once, in parallel.
+        #
+        # Two things used to make this slow on production (where storage is S3):
+        # each upload went out one after another, and assigning the *file object*
+        # to a FileField made obj.save() upload it a second time. Assigning the
+        # saved name instead just records the path, so each file crosses the wire
+        # once.
+        pending_uploads = []  # (field_name or None, history_key, label, file)
+
         good_part_image = request.FILES.get("good_part_image")
         if good_part_image:
-            from django.core.files.storage import default_storage
-            file_name = default_storage.save(f"hp_stock_images/{good_part_image.name}", good_part_image)
-            image_url = default_storage.url(file_name)
-            entry["image"] = image_url
-            
+            field = None
             if next_status == "GOOD_PART_PHOTO":
-                obj.good_part_image = good_part_image
+                field = "good_part_image"
             elif next_status == "RETURN_PART_PHOTO":
-                obj.return_part_image = good_part_image
+                field = "return_part_image"
+            pending_uploads.append((field, "image", None, good_part_image))
 
         good_part_image_back = request.FILES.get("good_part_image_back")
         if good_part_image_back:
-            from django.core.files.storage import default_storage
-            file_name = default_storage.save(f"hp_stock_images/{good_part_image_back.name}", good_part_image_back)
-            image_url_back = default_storage.url(file_name)
-            entry["image_back"] = image_url_back
-            
-            if next_status == "GOOD_PART_PHOTO":
-                obj.good_part_image_back = good_part_image_back
+            field = "good_part_image_back" if next_status == "GOOD_PART_PHOTO" else None
+            pending_uploads.append((field, "image_back", None, good_part_image_back))
 
         # Return part photo categories (all optional, only on RETURN_PART_PHOTO)
         return_photo_fields = [
@@ -590,17 +678,28 @@ class HPStockItemViewSet(viewsets.ModelViewSet):
             ("return_option_image_2", "Option Image 2"),
             ("return_option_image_3", "Option Image 3"),
         ]
-        uploaded_return_fields = []
         if next_status == "RETURN_PART_PHOTO":
-            from django.core.files.storage import default_storage
-            return_images = []
             for field_name, label in return_photo_fields:
                 uploaded = request.FILES.get(field_name)
                 if uploaded:
-                    saved_name = default_storage.save(f"hp_stock_images/{uploaded.name}", uploaded)
+                    pending_uploads.append((field_name, "return_images", label, uploaded))
+
+        uploaded_return_fields = []
+        if pending_uploads:
+            results = _upload_images_parallel([f for _, _, _, f in pending_uploads])
+
+            return_images = []
+            for (field_name, history_key, label, _), (saved_name, url) in zip(pending_uploads, results):
+                if field_name:
+                    # The saved name, not the file object — assigning the object would
+                    # make obj.save() re-upload it.
                     setattr(obj, field_name, saved_name)
-                    uploaded_return_fields.append(field_name)
-                    return_images.append({"label": label, "url": default_storage.url(saved_name)})
+                    if field_name.startswith("return_") and field_name != "return_part_image":
+                        uploaded_return_fields.append(field_name)
+                if history_key == "return_images":
+                    return_images.append({"label": label, "url": url})
+                else:
+                    entry[history_key] = url
             if return_images:
                 entry["return_images"] = return_images
 

@@ -8,6 +8,10 @@ djangorestframework==3.17.1
 djangorestframework_simplejwt==5.5.1
 gunicorn==23.0.0
 idna==3.11
+# Excel import for the HP Stock RMA parts catalog (hp_stock.views.import_excel).
+# openpyxl is the engine pandas.read_excel() uses for .xlsx — not optional.
+pandas==2.3.3
+openpyxl==3.1.5
 PyJWT==2.12.1
 requests==2.32.3
 psycopg2-binary==2.9.10
