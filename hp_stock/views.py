@@ -5,8 +5,15 @@ from rest_framework.decorators import action
 from django.db.models import Count, Q, Max, OuterRef, Subquery, DecimalField
 from django.db.models.functions import TruncDate
 from django.utils import timezone
-from .models import HPStockItem, HPStockRMAPart, OpencallPartsCount, OpencallActivePartCase
-from .serializers import HPStockItemSerializer, HPStockRMAPartSerializer, OpencallPartsCountSerializer
+from .models import (
+    HPStockItem, HPStockRMAPart, OpencallPartsCount, OpencallActivePartCase,
+    HPStockSettings, RECEIVED, SOURCE_MANUAL,
+)
+from .serializers import (
+    HPStockItemSerializer, HPStockRMAPartSerializer, OpencallPartsCountSerializer,
+    HPStockSettingsSerializer,
+)
+from rest_framework.views import APIView
 
 from rest_framework.pagination import PageNumberPagination
 import math
@@ -70,6 +77,18 @@ STAGES_AT_OR_PAST = {
 PENDING_RETURN_STATUSES = [
     s for s in STAGES_AT_OR_PAST['ISSUED'] if s not in STAGES_AT_OR_PAST['HANDOVER']
 ]
+
+# Rows the received-spare filter keeps. Read it as OR: any one reason is enough,
+# because a part vanishing from stock is far worse than one showing up early.
+#   RECEIVED            the spare is in hand (Flex said so, or the desk did)
+#   ''                  nobody ever classified it - unknown is not evidence of
+#                       absence (hand-added rows, cases Flex never carried)
+#   past Stock Entry    work already started; hiding it would strand the case
+RECEIVED_VISIBLE_Q = (
+    Q(part_received_status=RECEIVED)
+    | Q(part_received_status='')
+    | ~Q(status='PENDING')
+)
 
 
 def _ist_date_str(ts):
@@ -209,7 +228,35 @@ class HPStockItemViewSet(viewsets.ModelViewSet):
     permission_classes = [IsAuthenticated]
     pagination_class = CustomPageNumberPagination
 
+    # Only collection endpoints get the received-spare filter. Detail routes
+    # (retrieve, transition, edit, delete) must keep resolving a hidden row by
+    # id, or the In Transit tab could not act on the rows it lists.
+    RECEIVED_FILTER_ACTIONS = {'list', 'summary', 'daily_region_counts', 'dc_cut_value_counts'}
+
     def get_queryset(self):
+        """Scoped rows, plus the received-spare filter when the setting is on.
+
+        Every collection this viewset serves - the table, the tab counts, the
+        stage cards, the value bands - already flows through here, so one filter
+        in one place keeps them all counting the same set. With the setting off
+        this returns `_scoped_queryset()` untouched: the exact query HP Stock has
+        always run, which is what makes turning it off a clean rollback.
+        """
+        queryset = self._scoped_queryset()
+        if getattr(self, 'action', None) not in self.RECEIVED_FILTER_ACTIONS:
+            return queryset
+        if not HPStockSettings.received_only():
+            return queryset
+        # The In Transit tab is the receiving desk - it lists exactly what the
+        # filter hides, so nothing is ever invisible, only moved one tab over.
+        if self.request.query_params.get('is_closed', '').strip().lower() == 'in_transit':
+            return queryset.exclude(RECEIVED_VISIBLE_Q)
+        return queryset.filter(RECEIVED_VISIBLE_Q)
+
+    def _scoped_queryset(self):
+        """Role, region, tab, search and card filters - everything EXCEPT the
+        received-spare filter, so `summary()` can count the rows that filter
+        hides without re-deriving all the scoping."""
         queryset = super().get_queryset()
         user = self.request.user
         profile = getattr(user, 'userprofile', None)
@@ -253,7 +300,9 @@ class HPStockItemViewSet(viewsets.ModelViewSet):
                 queryset = queryset.filter(status='CLOSED')
             elif is_closed_param == 'dc_cut_request':
                 queryset = queryset.filter(status='DC_CUT_REQUEST')
-            elif is_closed_param == 'false':
+            elif is_closed_param in ('false', 'in_transit'):
+                # in_transit is the active set narrowed further in get_queryset();
+                # it must start from the same status scope as the Active tab.
                 queryset = queryset.exclude(status__in=['CLOSED', 'DC_CUT_REQUEST'])
 
         # Pending return: part taken by an engineer but not handed back yet. Its card
@@ -419,6 +468,21 @@ class HPStockItemViewSet(viewsets.ModelViewSet):
                 for band in PART_VALUE_BANDS
             }
 
+        # Rows the received-spare filter is hiding right now - the In Transit
+        # tab's badge. Counted from the UNfiltered scope on purpose: a count of
+        # what the filter removes cannot itself be filtered.
+        in_transit_total = 0
+        region_in_transit = {}
+        if HPStockSettings.received_only():
+            hidden = (
+                self._scoped_queryset()
+                .exclude(status__in=['CLOSED', 'DC_CUT_REQUEST'])
+                .exclude(RECEIVED_VISIBLE_Q)
+            )
+            in_transit_total = hidden.count()
+            for row in hidden.values('region').annotate(n=Count('id')):
+                region_in_transit[row['region'] or ''] = row['n']
+
         regions = list(queryset.values('region').annotate(
             total=Count('id'),
             active=Count('id', filter=~Q(status__in=['CLOSED', 'DC_CUT_REQUEST'])),
@@ -440,9 +504,27 @@ class HPStockItemViewSet(viewsets.ModelViewSet):
                 row['return_part_photo'] = by_stage.get('return_part_photo', 0)
                 row['issued'] = by_stage.get('issued', 0)
                 row['handover'] = by_stage.get('handover', 0)
+        for row in regions:
+            row['in_transit'] = region_in_transit.get(row.get('region') or '', 0)
+        # A region whose rows are ALL in transit would otherwise lose its card
+        # completely, taking its In Transit badge with it - and that region's
+        # parts are exactly the ones somebody needs to go and receive. Seed it.
+        seen_regions = {row.get('region') or '' for row in regions}
+        for region_name, hidden_count in region_in_transit.items():
+            if region_name in seen_regions:
+                continue
+            regions.append({
+                'region': region_name, 'total': 0, 'active': 0, 'dc_cut_request': 0,
+                'closed': 0, 'good_part_photo': 0, 'return_part_photo': 0,
+                'issued': 0, 'handover': 0, 'pending_return': 0,
+                'in_transit': hidden_count,
+            })
+
         return Response({
             'total': total,
             'active_total': active_total,
+            'in_transit_total': in_transit_total,
+            'received_spare_only': HPStockSettings.received_only(),
             'dc_cut_request_total': dc_cut_request_total,
             'closed_total': closed_total,
             'good_part_photo_total': good_part_photo_total,
@@ -523,6 +605,32 @@ class HPStockItemViewSet(viewsets.ModelViewSet):
             'day_totals': day_totals,
             'total': sum(r['count'] for r in rows),
         })
+
+    @action(detail=False, methods=['post'])
+    def mark_received(self, request):
+        """Tick parts off at the receiving desk, in bulk.
+
+        The courier drops a bag of spares and the same person marks them in Flex
+        and then works them here - but the Flex value only reaches us on the next
+        export, up to 15 minutes later. Without this they would stand and wait for
+        a row to appear. Marking here is immediate; the sync confirms it after,
+        and the serializer's sticky rule stops that sync walking it back.
+        """
+        ids = request.data.get('ids')
+        if not isinstance(ids, list) or not ids:
+            return Response({'detail': 'Send a non-empty "ids" list.'}, status=400)
+
+        # Scoped, so nobody can mark a row outside their own region.
+        targets = self._scoped_queryset().filter(id__in=ids).exclude(part_received_status=RECEIVED)
+        now = timezone.now()
+        updated = targets.update(
+            part_received_status=RECEIVED,
+            part_received_source=SOURCE_MANUAL,
+            part_received_at=now,
+            part_received_by=request.user,
+            updated_at=now,
+        )
+        return Response({'updated': updated, 'requested': len(ids)})
 
     def perform_create(self, serializer):
         user = self.request.user
@@ -996,3 +1104,37 @@ class OpencallPartsCountViewSet(viewsets.ModelViewSet):
             )
             written += 1
         return Response({'written': written})
+
+
+class HPStockSettingsView(APIView):
+    """The org-wide HP Stock display rules (singleton).
+
+    GET is open to any signed-in user - the HP Stock page has to know whether the
+    In Transit tab exists before it can render. PATCH is limited to the same roles
+    that already see across regions, because the switch changes what everyone sees.
+    """
+    permission_classes = [IsAuthenticated]
+    EDITOR_ROLES = ['admin', 'super_admin', 'manager']
+
+    def get(self, request):
+        data = HPStockSettingsSerializer(HPStockSettings.load()).data
+        profile = getattr(request.user, 'userprofile', None)
+        data['can_edit'] = getattr(profile, 'role', '') in self.EDITOR_ROLES
+        return Response(data)
+
+    def patch(self, request):
+        profile = getattr(request.user, 'userprofile', None)
+        if getattr(profile, 'role', '') not in self.EDITOR_ROLES:
+            return Response(
+                {'detail': 'Only an admin or manager can change HP Stock settings.'},
+                status=403,
+            )
+
+        settings_obj = HPStockSettings.load()
+        serializer = HPStockSettingsSerializer(settings_obj, data=request.data, partial=True)
+        serializer.is_valid(raise_exception=True)
+        serializer.save(updated_by=request.user)  # save() also clears the cache
+
+        data = HPStockSettingsSerializer(settings_obj).data
+        data['can_edit'] = True
+        return Response(data)

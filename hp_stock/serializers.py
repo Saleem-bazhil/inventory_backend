@@ -1,15 +1,25 @@
+from django.utils import timezone
 from rest_framework import serializers
-from .models import HPStockItem, HPStockRMAPart, OpencallPartsCount
+from .models import (
+    HPStockItem, HPStockRMAPart, OpencallPartsCount, HPStockSettings,
+    RECEIVED, SOURCE_FLEX,
+)
 
 class HPStockItemSerializer(serializers.ModelSerializer):
     created_by_name = serializers.CharField(source='created_by.get_full_name', read_only=True)
+    part_received_by_name = serializers.CharField(
+        source='part_received_by.get_full_name', read_only=True, default='',
+    )
     # Price matched from the HP Stock RMA Part catalog by good_part_number == part_number.
     price = serializers.SerializerMethodField()
 
     class Meta:
         model = HPStockItem
         fields = '__all__'
-        read_only_fields = ('created_by', 'created_at', 'updated_at', 'transition_history')
+        read_only_fields = (
+            'created_by', 'created_at', 'updated_at', 'transition_history',
+            'part_received_by',
+        )
 
     def _is_super_admin(self):
         request = self.context.get('request')
@@ -42,7 +52,35 @@ class HPStockItemSerializer(serializers.ModelSerializer):
         request = self.context.get('request')
         if request and hasattr(request, 'user'):
             validated_data['created_by'] = request.user
+        if validated_data.get('part_received_status') == RECEIVED:
+            validated_data.setdefault('part_received_at', timezone.now())
+            validated_data.setdefault('part_received_source', SOURCE_FLEX)
         return super().create(validated_data)
+
+    def update(self, instance, validated_data):
+        """Enforce the sticky rule: a received spare never becomes un-received.
+
+        The OpenCall sync pushes whatever the newest Flex export says on every
+        15-minute cycle, and a case that closes in Flex keeps re-serving its last
+        (possibly stale) part lines forever. Without this guard that could walk a
+        part back to in-transit and hide a row somebody is working on. Enforcing
+        it here rather than in the sync means the invariant holds for every
+        caller, and the sync gets to stay dumb.
+        """
+        incoming = validated_data.get('part_received_status')
+        already_received = instance.part_received_status == RECEIVED
+
+        if already_received and incoming is not None and incoming != RECEIVED:
+            # Keep the raw Flex value (flex_installed_status) - that mismatch is
+            # exactly what the reconciliation view is for - but drop the downgrade.
+            validated_data.pop('part_received_status', None)
+            validated_data.pop('part_received_source', None)
+            validated_data.pop('part_received_at', None)
+        elif incoming == RECEIVED and not already_received:
+            validated_data.setdefault('part_received_at', timezone.now())
+            validated_data.setdefault('part_received_source', SOURCE_FLEX)
+
+        return super().update(instance, validated_data)
 
 
 class HPStockRMAPartSerializer(serializers.ModelSerializer):
@@ -55,3 +93,14 @@ class OpencallPartsCountSerializer(serializers.ModelSerializer):
     class Meta:
         model = OpencallPartsCount
         fields = ('id', 'report_date', 'region', 'count', 'updated_at')
+
+
+class HPStockSettingsSerializer(serializers.ModelSerializer):
+    updated_by_name = serializers.CharField(
+        source='updated_by.get_full_name', read_only=True, default='',
+    )
+
+    class Meta:
+        model = HPStockSettings
+        fields = ('received_spare_only', 'updated_by_name', 'updated_at')
+        read_only_fields = ('updated_by_name', 'updated_at')

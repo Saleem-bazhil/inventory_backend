@@ -1,5 +1,28 @@
 from django.contrib.auth.models import User
+from django.core.cache import cache
 from django.db import models
+
+# Whether the spare for a row is physically in hand. Mirrored from OpenCall's
+# "Good Part Installed Status" (RCV_SPARE / YTR_INTRANSIT), or set by hand at the
+# receiving desk when the courier drops the parts off.
+RECEIVED = "RECEIVED"
+IN_TRANSIT = "IN_TRANSIT"
+PART_RECEIVED_STATUS_CHOICES = [
+    ("", "Unknown"),
+    (RECEIVED, "Received"),
+    (IN_TRANSIT, "In Transit"),
+]
+
+# Who decided the row is received. MANUAL means someone ticked it off at the desk
+# before the next Flex export landed; FLEX means the sync confirmed it.
+SOURCE_FLEX = "FLEX"
+SOURCE_MANUAL = "MANUAL"
+PART_RECEIVED_SOURCE_CHOICES = [
+    ("", "—"),
+    (SOURCE_FLEX, "Flex sync"),
+    (SOURCE_MANUAL, "Marked at the desk"),
+]
+
 
 class HPStockItem(models.Model):
     case_id = models.CharField(max_length=100, blank=True, default="", verbose_name="Case ID")
@@ -57,6 +80,31 @@ class HPStockItem(models.Model):
     part_description = models.TextField(blank=True, default="", verbose_name="Part Description")
     customer_name = models.CharField(max_length=255, blank=True, default="", verbose_name="Customer Name")
     inventory_details = models.TextField(blank=True, default="", verbose_name="Inventory Details")
+
+    # --- Has the spare physically landed? ---------------------------------------
+    # `part_received_status` is the DECISION and it is sticky: once RECEIVED it is
+    # never walked back, so a case that later drops out of the Flex export cannot
+    # make a row someone is working on disappear.
+    part_received_status = models.CharField(
+        max_length=20, blank=True, default="", db_index=True,
+        choices=PART_RECEIVED_STATUS_CHOICES, verbose_name="Part Received Status",
+    )
+    part_received_source = models.CharField(
+        max_length=10, blank=True, default="",
+        choices=PART_RECEIVED_SOURCE_CHOICES, verbose_name="Received Marked By",
+    )
+    part_received_at = models.DateTimeField(null=True, blank=True, verbose_name="Received At")
+    part_received_by = models.ForeignKey(
+        User, on_delete=models.SET_NULL, null=True, blank=True,
+        related_name="hp_stock_received_marks", verbose_name="Received Marked By User",
+    )
+    # The raw last-seen Flex value, overwritten every sync and NEVER sticky. Kept
+    # apart from the decision above so "we marked it received but Flex still says
+    # in transit" is a one-line query instead of guesswork.
+    flex_installed_status = models.CharField(
+        max_length=40, blank=True, default="", verbose_name="Flex Installed Status",
+    )
+
     transition_history = models.JSONField(default=list, blank=True, verbose_name="Transition History")
     opencall_case_details = models.JSONField(default=dict, blank=True, verbose_name="Opencall Case Details")
     case_created_time = models.DateTimeField(null=True, blank=True, verbose_name="Case Created Time")
@@ -138,3 +186,55 @@ class OpencallActivePartCase(models.Model):
 
     def __str__(self):
         return f"{self.report_date} {self.case_id} ({self.region})"
+
+
+HP_STOCK_SETTINGS_CACHE_KEY = "hp_stock:received_spare_only"
+
+
+class HPStockSettings(models.Model):
+    """Org-wide HP Stock display rules. Singleton — always row pk=1.
+
+    `received_spare_only` hides rows whose spare has not physically landed yet.
+    It defaults to False, which is the behaviour HP Stock has always had, so
+    nothing changes until an admin turns it on (and turning it off restores the
+    old query exactly — the filter block is skipped, not inverted).
+    """
+    received_spare_only = models.BooleanField(
+        default=False, verbose_name="Show received spares only",
+        help_text="Hide part rows that Flex still reports as in transit.",
+    )
+    updated_by = models.ForeignKey(
+        User, on_delete=models.SET_NULL, null=True, blank=True,
+        related_name="hp_stock_settings_updates",
+    )
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        verbose_name = "HP Stock Settings"
+        verbose_name_plural = "HP Stock Settings"
+
+    def __str__(self):
+        return f"HP Stock Settings (received-only: {self.received_spare_only})"
+
+    def save(self, *args, **kwargs):
+        self.pk = 1  # singleton: every save lands on the same row
+        super().save(*args, **kwargs)
+        cache.delete(HP_STOCK_SETTINGS_CACHE_KEY)
+
+    @classmethod
+    def load(cls):
+        obj, _ = cls.objects.get_or_create(pk=1)
+        return obj
+
+    @classmethod
+    def received_only(cls):
+        """The toggle, cached briefly — it is read on every list and summary call.
+
+        `None` (cache miss) is distinguished from `False` (toggle genuinely off),
+        so an off switch is not re-queried on every request.
+        """
+        cached = cache.get(HP_STOCK_SETTINGS_CACHE_KEY)
+        if cached is None:
+            cached = cls.load().received_spare_only
+            cache.set(HP_STOCK_SETTINGS_CACHE_KEY, cached, 60)
+        return cached
