@@ -2,7 +2,7 @@ from django.utils import timezone
 from rest_framework import serializers
 from .models import (
     HPStockItem, HPStockRMAPart, OpencallPartsCount, HPStockSettings,
-    RECEIVED, SOURCE_FLEX,
+    RECEIVED, SOURCE_FLEX, SOURCE_MANUAL,
 )
 
 class HPStockItemSerializer(serializers.ModelSerializer):
@@ -49,10 +49,24 @@ class HPStockItemSerializer(serializers.ModelSerializer):
         return float(price) if price is not None else None
 
     def create(self, validated_data):
+        """Create, stamping a hand-keyed row as already received.
+
+        Who is creating this? The OpenCall sync always sends
+        `part_received_status`, even as '' when Flex said nothing; the HP Stock
+        form never sends the key at all. So an absent key means a person is
+        entering a part they are physically holding - stamp it RECEIVED, or the
+        received-only filter would hide the row the moment they saved it. A key
+        that is present is honoured exactly as sent, blank included.
+        """
         request = self.context.get('request')
         if request and hasattr(request, 'user'):
             validated_data['created_by'] = request.user
-        if validated_data.get('part_received_status') == RECEIVED:
+
+        if 'part_received_status' not in validated_data:
+            validated_data['part_received_status'] = RECEIVED
+            validated_data['part_received_source'] = SOURCE_MANUAL
+            validated_data['part_received_at'] = timezone.now()
+        elif validated_data.get('part_received_status') == RECEIVED:
             validated_data.setdefault('part_received_at', timezone.now())
             validated_data.setdefault('part_received_source', SOURCE_FLEX)
         return super().create(validated_data)

@@ -39,9 +39,9 @@ class ReceivedSpareFilterTests(TestCase):
 
         # On the shelf.
         self.received = self._item('C-RECEIVED', part_received_status=RECEIVED)
-        # Flex never classified it: unknown is not evidence of absence.
+        # Flex never classified it. Unknown is the resting state of every row
+        # whose case has left the daily export, so it is hidden, not trusted.
         self.unknown = self._item('C-UNKNOWN')
-        # The only row the filter should hide.
         self.transit = self._item('C-TRANSIT', part_received_status=IN_TRANSIT)
         # In transit per Flex, but an engineer already took it: never hide.
         self.working = self._item(
@@ -78,17 +78,19 @@ class ReceivedSpareFilterTests(TestCase):
         self.assertEqual(res.data['in_transit_total'], 0)
         self.assertFalse(res.data['received_spare_only'])
 
-    # --- on: exactly one row moves -------------------------------------------
-    def test_on_hides_only_the_in_transit_row(self):
+    # --- on: anything not proven received moves -------------------------------
+    def test_on_active_keeps_only_proven_received_rows(self):
+        """Received, or already worked on. Unknown is not good enough."""
         self._toggle(True)
         self.assertEqual(
-            self._case_ids(is_closed='false'),
-            ['C-RECEIVED', 'C-UNKNOWN', 'C-WORKING'],
+            self._case_ids(is_closed='false'), ['C-RECEIVED', 'C-WORKING'],
         )
 
     def test_on_in_transit_tab_lists_exactly_what_was_hidden(self):
         self._toggle(True)
-        self.assertEqual(self._case_ids(is_closed='in_transit'), ['C-TRANSIT'])
+        self.assertEqual(
+            self._case_ids(is_closed='in_transit'), ['C-TRANSIT', 'C-UNKNOWN'],
+        )
 
     def test_on_closed_tab_still_shows_closed_rows(self):
         self._toggle(True)
@@ -97,10 +99,35 @@ class ReceivedSpareFilterTests(TestCase):
     def test_on_summary_counts_and_flags(self):
         self._toggle(True)
         res = self.client.get(ITEMS + 'summary/')
-        self.assertEqual(res.data['in_transit_total'], 1)
+        self.assertEqual(res.data['in_transit_total'], 2)
         self.assertTrue(res.data['received_spare_only'])
         salem = next(r for r in res.data['regions'] if r['region'] == 'salem')
-        self.assertEqual(salem['in_transit'], 1)
+        self.assertEqual(salem['in_transit'], 2)
+
+    # --- hand-keyed rows survive the filter -----------------------------------
+    def test_row_added_through_the_form_stays_visible(self):
+        """Somebody keying in a part is holding it; it must not vanish on save."""
+        self._toggle(True)
+        res = self.client.post(
+            ITEMS, {'case_id': 'C-BYHAND', 'region': 'salem'}, format='json',
+        )
+        self.assertEqual(res.status_code, 201)
+        self.assertEqual(res.data['part_received_status'], RECEIVED)
+        self.assertEqual(res.data['part_received_source'], SOURCE_MANUAL)
+        self.assertIn('C-BYHAND', self._case_ids(is_closed='false'))
+
+    def test_sync_created_row_keeps_the_blank_it_sent(self):
+        """The sync sends the key explicitly, so its blank is honoured, not stamped."""
+        self._toggle(True)
+        res = self.client.post(
+            ITEMS,
+            {'case_id': 'C-SYNCED', 'region': 'salem', 'part_received_status': ''},
+            format='json',
+        )
+        self.assertEqual(res.status_code, 201)
+        self.assertEqual(res.data['part_received_status'], '')
+        self.assertNotIn('C-SYNCED', self._case_ids(is_closed='false'))
+        self.assertIn('C-SYNCED', self._case_ids(is_closed='in_transit'))
 
     def test_on_hidden_row_is_still_reachable_by_id(self):
         """Detail routes must not 404, or the tab could not act on what it lists."""
@@ -146,7 +173,8 @@ class ReceivedSpareFilterTests(TestCase):
         self.assertEqual(self.transit.part_received_source, SOURCE_MANUAL)
         self.assertEqual(self.transit.part_received_by, self.admin)
         self.assertIn('C-TRANSIT', self._case_ids(is_closed='false'))
-        self.assertEqual(self._case_ids(is_closed='in_transit'), [])
+        # It leaves the desk; the still-unclassified row stays behind on it.
+        self.assertEqual(self._case_ids(is_closed='in_transit'), ['C-UNKNOWN'])
 
     def test_mark_received_rejects_an_empty_payload(self):
         res = self.client.post(ITEMS + 'mark_received/', {'ids': []}, format='json')

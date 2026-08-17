@@ -78,15 +78,20 @@ PENDING_RETURN_STATUSES = [
     s for s in STAGES_AT_OR_PAST['ISSUED'] if s not in STAGES_AT_OR_PAST['HANDOVER']
 ]
 
-# Rows the received-spare filter keeps. Read it as OR: any one reason is enough,
-# because a part vanishing from stock is far worse than one showing up early.
+# Rows the received-spare filter keeps. Read it as OR: either reason is enough.
 #   RECEIVED            the spare is in hand (Flex said so, or the desk did)
-#   ''                  nobody ever classified it - unknown is not evidence of
-#                       absence (hand-added rows, cases Flex never carried)
-#   past Stock Entry    work already started; hiding it would strand the case
+#   past Stock Entry    work already started - a part someone has photographed or
+#                       issued is in hand by definition, whatever Flex exports
+#
+# An unclassified row ('') is deliberately NOT kept. Flex only refreshes cases
+# still in the daily export, so "unknown" is the resting state of every older
+# row - treating it as visible made the whole filter a no-op (thousands of rows,
+# none of them classified, nothing ever hidden). Nothing is lost by hiding them:
+# what this excludes is exactly what the In Transit tab lists, and the receiving
+# desk ticks it off. Rows keyed in by hand are stamped RECEIVED at creation (see
+# HPStockItemSerializer.create), so they never land here.
 RECEIVED_VISIBLE_Q = (
     Q(part_received_status=RECEIVED)
-    | Q(part_received_status='')
     | ~Q(status='PENDING')
 )
 
