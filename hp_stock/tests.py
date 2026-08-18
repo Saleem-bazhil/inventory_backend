@@ -9,13 +9,16 @@ from io import StringIO
 from django.contrib.auth.models import User
 from django.core.cache import cache
 from django.core.management import call_command
+from django.core.management.base import CommandError
+from django.utils import timezone
 from django.test import TestCase
 from rest_framework.test import APIClient
 
 # Absolute import: hp_stock is a namespace package (no __init__.py), so the test
 # loader has no parent package to resolve a relative import against.
 from hp_stock.models import (
-    HPStockItem, HPStockSettings, RECEIVED, IN_TRANSIT, SOURCE_MANUAL,
+    HPStockItem, HPStockSettings, OpencallActivePartCase,
+    RECEIVED, IN_TRANSIT, SOURCE_MANUAL,
 )
 
 from authenticate.models import UserProfile
@@ -338,3 +341,107 @@ class DedupeHPStockCommandTests(TestCase):
         self._run(apply=True)
 
         self.assertFalse(HPStockItem.objects.filter(pk=twin.pk).exists())
+
+
+class CloseStaleHPStockCommandTests(TestCase):
+    """Retiring rows whose OpenCall case has finished in the field.
+
+    As with the dedupe, the assertions that matter are the refusals: closing a
+    row that is still in flight loses the fact that a part is out with someone.
+    """
+
+    REPORT_DATE = '2026-08-18'
+
+    def _item(self, case_id, created, **kwargs):
+        kwargs.setdefault('region', 'salem')
+        kwargs.setdefault('status', 'PENDING')
+        item = HPStockItem.objects.create(case_id=case_id, **kwargs)
+        HPStockItem.objects.filter(pk=item.pk).update(
+            created_at=created, case_created_time=created,
+        )
+        item.refresh_from_db()
+        return item
+
+    def _active(self, *case_ids):
+        for case_id in case_ids:
+            OpencallActivePartCase.objects.create(
+                report_date=self.REPORT_DATE, case_id=case_id, region='salem',
+            )
+
+    def _run(self, **opts):
+        out = StringIO()
+        call_command('close_stale_hp_stock', stdout=out, **opts)
+        return out.getvalue()
+
+    def setUp(self):
+        self.old = datetime(2026, 6, 1, 6, 0, tzinfo=dt_timezone.utc)
+        self.recent = timezone.now()
+
+    def test_closes_a_row_whose_case_left_the_active_list(self):
+        self._active('C-LIVE')
+        stale = self._item('C-GONE', self.old)
+
+        self._run(apply=True)
+
+        stale.refresh_from_db()
+        self.assertEqual(stale.status, 'CLOSED')
+
+    def test_writes_an_audit_trail_entry(self):
+        self._active('C-LIVE')
+        stale = self._item('C-GONE', self.old)
+
+        self._run(apply=True)
+
+        stale.refresh_from_db()
+        entry = stale.transition_history[-1]
+        self.assertEqual(entry['from_status'], 'PENDING')
+        self.assertEqual(entry['to_status'], 'CLOSED')
+        self.assertIn('no longer active', entry['comment'])
+
+    def test_dry_run_writes_nothing(self):
+        self._active('C-LIVE')
+        stale = self._item('C-GONE', self.old)
+
+        output = self._run()
+
+        stale.refresh_from_db()
+        self.assertEqual(stale.status, 'PENDING')
+        self.assertIn('DRY RUN', output)
+
+    def test_keeps_a_row_whose_case_is_still_active(self):
+        self._active('C-LIVE')
+        live = self._item('C-LIVE', self.old)
+
+        self._run(apply=True)
+
+        live.refresh_from_db()
+        self.assertEqual(live.status, 'PENDING')
+
+    def test_keeps_a_part_still_out_with_an_engineer(self):
+        """Closing this would erase the fact that somebody is holding the part."""
+        self._active('C-LIVE')
+        issued = self._item('C-GONE', self.old, status='ISSUED')
+
+        output = self._run(apply=True)
+
+        issued.refresh_from_db()
+        self.assertEqual(issued.status, 'ISSUED')
+        self.assertIn('still out with an engineer', output)
+
+    def test_keeps_a_row_inside_the_grace_period(self):
+        self._active('C-LIVE')
+        fresh = self._item('C-GONE', self.recent)
+
+        self._run(apply=True)
+
+        fresh.refresh_from_db()
+        self.assertEqual(fresh.status, 'PENDING')
+
+    def test_refuses_to_run_without_an_active_case_list(self):
+        """No list means "we were not told", not "nothing is active"."""
+        self._item('C-GONE', self.old)
+
+        with self.assertRaises(CommandError):
+            self._run(apply=True)
+
+        self.assertEqual(HPStockItem.objects.get(case_id='C-GONE').status, 'PENDING')
