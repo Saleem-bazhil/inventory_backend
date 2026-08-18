@@ -129,6 +129,21 @@ class ReceivedSpareFilterTests(TestCase):
         self.assertNotIn('C-SYNCED', self._case_ids(is_closed='false'))
         self.assertIn('C-SYNCED', self._case_ids(is_closed='in_transit'))
 
+    def test_on_search_still_finds_hidden_rows(self):
+        """The sync locates a case's rows with ?search= and CREATES any it cannot
+        see. If the filter applied here it would duplicate every hidden row on
+        every cycle, so a targeted lookup must return the whole case."""
+        self._toggle(True)
+        self.assertEqual(self._case_ids(search='C-TRANSIT'), ['C-TRANSIT'])
+        self.assertEqual(self._case_ids(search='C-UNKNOWN'), ['C-UNKNOWN'])
+
+    def test_on_search_inside_the_in_transit_tab_still_scopes_to_hidden(self):
+        """The receiving desk keeps its own meaning when someone searches it."""
+        self._toggle(True)
+        self.assertEqual(
+            self._case_ids(is_closed='in_transit', search='C-RECEIVED'), [],
+        )
+
     def test_on_hidden_row_is_still_reachable_by_id(self):
         """Detail routes must not 404, or the tab could not act on what it lists."""
         self._toggle(True)

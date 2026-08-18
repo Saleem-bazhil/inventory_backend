@@ -256,6 +256,15 @@ class HPStockItemViewSet(viewsets.ModelViewSet):
         # filter hides, so nothing is ever invisible, only moved one tab over.
         if self.request.query_params.get('is_closed', '').strip().lower() == 'in_transit':
             return queryset.exclude(RECEIVED_VISIBLE_Q)
+        # A targeted lookup is NEVER filtered. The OpenCall sync finds a case's
+        # existing rows with ?search=<case_id> and creates one for every part it
+        # cannot see - so hiding rows here made it re-create them on every
+        # 15-minute cycle, and each new row was hidden too. That ran 5k rows to
+        # 24k in a day. It is the same trap the sync already guards against for
+        # region scoping, entered through a different door. A person searching a
+        # case id wants the whole case back too, in transit or not.
+        if self.request.query_params.get('search', '').strip():
+            return queryset
         return queryset.filter(RECEIVED_VISIBLE_Q)
 
     def _scoped_queryset(self):
