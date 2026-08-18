@@ -437,6 +437,36 @@ class CloseStaleHPStockCommandTests(TestCase):
         fresh.refresh_from_db()
         self.assertEqual(fresh.status, 'PENDING')
 
+    def test_keeps_a_part_received_but_never_issued(self):
+        """Somebody handled this spare and no engineer took it - it is on a shelf."""
+        self._active('C-LIVE')
+        on_shelf = self._item('C-GONE', self.old, status='GOOD_PART_PHOTO')
+
+        output = self._run(apply=True)
+
+        on_shelf.refresh_from_db()
+        self.assertEqual(on_shelf.status, 'GOOD_PART_PHOTO')
+        self.assertIn('received but never issued', output)
+
+    def test_include_in_stock_closes_them_anyway(self):
+        self._active('C-LIVE')
+        on_shelf = self._item('C-GONE', self.old, status='STOCK_CHECK')
+
+        self._run(apply=True, include_in_stock=True)
+
+        on_shelf.refresh_from_db()
+        self.assertEqual(on_shelf.status, 'CLOSED')
+
+    def test_closes_a_part_the_engineer_already_handed_back(self):
+        """Past HANDOVER the part is back in the building - nothing is in flight."""
+        self._active('C-LIVE')
+        returned = self._item('C-GONE', self.old, status='RETURN_PART_PHOTO')
+
+        self._run(apply=True)
+
+        returned.refresh_from_db()
+        self.assertEqual(returned.status, 'CLOSED')
+
     def test_refuses_to_run_without_an_active_case_list(self):
         """No list means "we were not told", not "nothing is active"."""
         self._item('C-GONE', self.old)

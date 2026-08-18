@@ -17,6 +17,10 @@ What it will NEVER close, so nothing in flight is lost:
     Pending Return card exists to chase exactly these, and closing one would
     erase the fact that somebody is still holding it
   - a DC Cut request, which is waiting on an approval, not on the field
+  - a part somebody received and handled but never issued (stock-checked or
+    photographed). The case being over does not put that spare back on a van -
+    it is sitting in a warehouse, and a person has to decide whether it goes
+    back to HP. Pass --include-in-stock to close these too.
   - anything already closed
   - anything newer than --grace-days (default 7), so one bad daily report
     cannot sweep the board
@@ -45,6 +49,12 @@ from hp_stock.views import PENDING_RETURN_STATUSES, opencall_active_case_ids
 SAMPLE_ROWS = 15
 ACTOR = "System (OpenCall reconcile)"
 
+# Received and handled, but never issued to anybody. Someone physically had this
+# part in their hands to check it in or photograph it, and no engineer ever took
+# it - so it is still on a shelf. That is a real asset, not a stale record, and
+# closing it silently is how stock goes missing on paper.
+IN_STOCK_STATUSES = ['STOCK_CHECK', 'GOOD_PART_PHOTO']
+
 
 class Command(BaseCommand):
     help = "Close HP Stock rows whose OpenCall case is no longer active."
@@ -59,6 +69,10 @@ class Command(BaseCommand):
             help="Leave rows younger than this alone (default 7).",
         )
         parser.add_argument(
+            '--include-in-stock', action='store_true',
+            help="Also close parts received but never issued (default: keep).",
+        )
+        parser.add_argument(
             '--region', default='',
             help="Restrict to one region. Default: every region.",
         )
@@ -66,6 +80,7 @@ class Command(BaseCommand):
     def handle(self, *args, **options):
         apply_changes = options['apply']
         grace_days = options['grace_days']
+        include_in_stock = options['include_in_stock']
         region = options['region'].strip()
 
         if grace_days < 0:
@@ -105,7 +120,7 @@ class Command(BaseCommand):
 
         closable, held = [], []
         for row in rows:
-            reason = self._held_reason(row, active, cutoff)
+            reason = self._held_reason(row, active, cutoff, include_in_stock)
             if reason:
                 held.append((row, reason))
             else:
@@ -126,12 +141,14 @@ class Command(BaseCommand):
         closed = self._close(closable)
         self.stdout.write(self.style.SUCCESS(f"\n[Close] closed {closed} rows."))
 
-    def _held_reason(self, row, active, cutoff):
+    def _held_reason(self, row, active, cutoff, include_in_stock):
         """Why this row must stay open, or None when it is safe to close."""
         if row['case_id'] in active:
             return 'case is still active in OpenCall'
         if row['status'] in PENDING_RETURN_STATUSES:
             return 'part is still out with an engineer'
+        if not include_in_stock and row['status'] in IN_STOCK_STATUSES:
+            return 'part was received but never issued - review'
         # case_created_time is the field date and is the honest age of the work;
         # created_at is when the sync first saw it and is the fallback.
         age_from = row['case_created_time'] or row['created_at']
