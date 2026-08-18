@@ -3,8 +3,12 @@
 The important assertions here are the negative ones: with the setting OFF, every
 HP Stock query must behave exactly as it always has.
 """
+from datetime import datetime, timezone as dt_timezone
+from io import StringIO
+
 from django.contrib.auth.models import User
 from django.core.cache import cache
+from django.core.management import call_command
 from django.test import TestCase
 from rest_framework.test import APIClient
 
@@ -240,3 +244,97 @@ class HPStockSettingsEndpointTests(TestCase):
         )
         self.assertEqual(res.status_code, 403)
         self.assertFalse(HPStockSettings.received_only())
+
+
+class DedupeHPStockCommandTests(TestCase):
+    """The cleanup for the duplicates the blind sync created.
+
+    Every assertion here is about what the command REFUSES to delete - that is
+    the whole point of it. Losing a row an engineer worked on is far worse than
+    leaving a duplicate behind for a person to look at.
+    """
+
+    def _item(self, case_id, part_order, created, **kwargs):
+        kwargs.setdefault('region', 'salem')
+        kwargs.setdefault('status', 'PENDING')
+        item = HPStockItem.objects.create(
+            case_id=case_id, part_order_number=part_order, **kwargs
+        )
+        # created_at is auto_now_add, so it has to be forced after the fact.
+        HPStockItem.objects.filter(pk=item.pk).update(created_at=created)
+        item.refresh_from_db()
+        return item
+
+    def _run(self, **opts):
+        out = StringIO()
+        call_command('dedupe_hp_stock', stdout=out, **opts)
+        return out.getvalue()
+
+    def setUp(self):
+        self.old = datetime(2026, 8, 10, 6, 0, tzinfo=dt_timezone.utc)
+        self.new = datetime(2026, 8, 18, 6, 0, tzinfo=dt_timezone.utc)
+
+    def test_deletes_the_newer_twin_and_keeps_the_original(self):
+        original = self._item('C-1', 'MO-1', self.old)
+        twin = self._item('C-1', 'MO-1', self.new)
+
+        self._run(apply=True)
+
+        self.assertTrue(HPStockItem.objects.filter(pk=original.pk).exists())
+        self.assertFalse(HPStockItem.objects.filter(pk=twin.pk).exists())
+
+    def test_dry_run_writes_nothing(self):
+        self._item('C-1', 'MO-1', self.old)
+        self._item('C-1', 'MO-1', self.new)
+
+        output = self._run()
+
+        self.assertEqual(HPStockItem.objects.count(), 2)
+        self.assertIn('DRY RUN', output)
+
+    def test_keeps_a_duplicate_somebody_photographed(self):
+        """The employee worked the twin, not the original - a person decides."""
+        self._item('C-1', 'MO-1', self.old)
+        worked = self._item(
+            'C-1', 'MO-1', self.new,
+            transition_history=[{'to_status': 'GOOD_PART_PHOTO'}],
+        )
+
+        output = self._run(apply=True)
+
+        self.assertTrue(HPStockItem.objects.filter(pk=worked.pk).exists())
+        self.assertIn('has transition history', output)
+
+    def test_keeps_a_duplicate_past_stock_entry(self):
+        self._item('C-1', 'MO-1', self.old)
+        issued = self._item('C-1', 'MO-1', self.new, status='ISSUED')
+
+        self._run(apply=True)
+
+        self.assertTrue(HPStockItem.objects.filter(pk=issued.pk).exists())
+
+    def test_leaves_duplicates_that_predate_the_window(self):
+        self._item('C-1', 'MO-1', self.old)
+        older_twin = self._item('C-1', 'MO-1', self.old)
+
+        self._run(apply=True)
+
+        self.assertTrue(HPStockItem.objects.filter(pk=older_twin.pk).exists())
+
+    def test_different_parts_on_one_case_are_not_duplicates(self):
+        """A multi-part case is normal - one row per part, none of them twins."""
+        self._item('C-1', 'MO-1', self.old)
+        self._item('C-1', 'MO-2', self.new)
+
+        self._run(apply=True)
+
+        self.assertEqual(HPStockItem.objects.count(), 2)
+
+    def test_falls_back_to_good_part_number_when_there_is_no_order_number(self):
+        """Part identity mirrors the sync: order number, else good part number."""
+        self._item('C-1', '', self.old, good_part_number='N123-001')
+        twin = self._item('C-1', '', self.new, good_part_number='N123-001')
+
+        self._run(apply=True)
+
+        self.assertFalse(HPStockItem.objects.filter(pk=twin.pk).exists())
