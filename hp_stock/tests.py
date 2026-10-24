@@ -111,6 +111,30 @@ class ReceivedSpareFilterTests(TestCase):
         salem = next(r for r in res.data['regions'] if r['region'] == 'salem')
         self.assertEqual(salem['in_transit'], 2)
 
+    # --- the opened-date filter (the table opens on today) --------------------
+    def test_date_filter_uses_the_ist_day(self):
+        """00:30 IST on the 24th is still the 23rd in UTC - it belongs to the 24th."""
+        self.transit.case_created_time = datetime(2020, 10, 23, 19, 0, tzinfo=dt_timezone.utc)
+        self.transit.save()
+        self.unknown.case_created_time = datetime(2020, 10, 23, 10, 0, tzinfo=dt_timezone.utc)
+        self.unknown.save()
+        self.assertEqual(self._case_ids(is_closed='false', date='2020-10-24'), ['C-TRANSIT'])
+        self.assertEqual(self._case_ids(is_closed='false', date='2020-10-23'), ['C-UNKNOWN'])
+
+    def test_in_transit_badge_follows_the_table_date(self):
+        self._toggle(True)
+        self.transit.case_created_time = datetime(2020, 10, 24, 5, 0, tzinfo=dt_timezone.utc)
+        self.transit.save()
+        self.unknown.case_created_time = datetime(2020, 10, 20, 5, 0, tzinfo=dt_timezone.utc)
+        self.unknown.save()
+        res = self.client.get(ITEMS + 'summary/', {'transit_date': '2020-10-24'})
+        self.assertEqual(res.data['in_transit_total'], 1)
+        self.assertEqual(
+            self._case_ids(is_closed='in_transit', date='2020-10-24'), ['C-TRANSIT'],
+        )
+        # No date: the badge is the all-time count, as before.
+        self.assertEqual(self.client.get(ITEMS + 'summary/').data['in_transit_total'], 2)
+
     # --- hand-keyed rows survive the filter -----------------------------------
     def test_row_added_through_the_form_stays_visible(self):
         """Somebody keying in a part is holding it; it must not vanish on save."""

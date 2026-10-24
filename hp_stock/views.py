@@ -114,6 +114,25 @@ def _ist_date_str(ts):
     return dt.astimezone(IST).date().isoformat()
 
 
+def opened_on_date_q(date_str):
+    """Rows whose case was opened on this IST calendar day (YYYY-MM-DD).
+
+    `case_created_time__date` would take the date in UTC (TIME_ZONE is UTC), so a
+    case opened before 05:30 IST landed on the previous day. Match the IST day's
+    bounds instead. Rows without a case time fall back to when the row was made.
+    """
+    try:
+        day = datetime.strptime(date_str, '%Y-%m-%d')
+    except ValueError:
+        return Q(pk__in=[])
+    start = day.replace(tzinfo=IST)
+    end = start + timedelta(days=1)
+    return (
+        Q(case_created_time__gte=start, case_created_time__lt=end)
+        | Q(case_created_time__isnull=True, created_at__gte=start, created_at__lt=end)
+    )
+
+
 def stage_reached_on_date(history, target_status, date_str):
     """True if this transition_history reached `target_status` on the date (YYYY-MM-DD).
 
@@ -351,10 +370,7 @@ class HPStockItemViewSet(viewsets.ModelViewSet):
         # Likewise skip it when stage_on_date is driving a history-based stage filter,
         # so a date-scoped card click isn't also narrowed by case-creation date.
         if date_param and self.action != 'summary' and not stage_on_date_param:
-            queryset = queryset.filter(
-                Q(case_created_time__date=date_param) |
-                Q(case_created_time__isnull=True, created_at__date=date_param)
-            )
+            queryset = queryset.filter(opened_on_date_q(date_param))
 
         if warranty_trade_param and warranty_trade_param.lower() != 'all':
             queryset = queryset.filter(warranty_trade=warranty_trade_param)
@@ -493,6 +509,12 @@ class HPStockItemViewSet(viewsets.ModelViewSet):
                 .exclude(status__in=['CLOSED', 'DC_CUT_REQUEST'])
                 .exclude(RECEIVED_VISIBLE_Q)
             )
+            # The badge sits on the table's tab, so it follows the table's
+            # opened-date filter (sent as transit_date - `date` already means
+            # the stage cards' day here) and matches the rows the tab lists.
+            transit_date = request.query_params.get('transit_date', '').strip()
+            if transit_date:
+                hidden = hidden.filter(opened_on_date_q(transit_date))
             in_transit_total = hidden.count()
             for row in hidden.values('region').annotate(n=Count('id')):
                 region_in_transit[row['region'] or ''] = row['n']
