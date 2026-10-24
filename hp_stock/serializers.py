@@ -97,6 +97,20 @@ class HPStockItemSerializer(serializers.ModelSerializer):
         return super().update(instance, validated_data)
 
 
+class HPStockItemListSerializer(HPStockItemSerializer):
+    """The table's rows: everything except inventory_details.
+
+    inventory_details is OpenCall's whole report history for the case, rewritten
+    by every sync. On a case that has been open for weeks it reaches ~1 MB, and
+    only the case details popup reads it (it fetches the one item). Twenty of
+    those made a table page take 90 seconds.
+    """
+
+    class Meta(HPStockItemSerializer.Meta):
+        fields = None
+        exclude = ('inventory_details',)
+
+
 class HPStockRMAPartSerializer(serializers.ModelSerializer):
     class Meta:
         model = HPStockRMAPart

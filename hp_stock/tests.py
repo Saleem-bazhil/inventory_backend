@@ -111,6 +111,17 @@ class ReceivedSpareFilterTests(TestCase):
         salem = next(r for r in res.data['regions'] if r['region'] == 'salem')
         self.assertEqual(salem['in_transit'], 2)
 
+    # --- the table leaves out the case's report history ----------------------
+    def test_list_omits_inventory_details_but_the_item_keeps_it(self):
+        self.received.inventory_details = '[01/10/2026] RTPL: x' * 1000
+        self.received.save()
+        res = self.client.get(ITEMS, {'is_closed': 'false'})
+        row = next(r for r in res.data['items'] if r['case_id'] == 'C-RECEIVED')
+        self.assertNotIn('inventory_details', row)
+        self.assertIn('case_id', row)
+        res = self.client.get(f'{ITEMS}{self.received.id}/')
+        self.assertEqual(res.data['inventory_details'], self.received.inventory_details)
+
     # --- the date shows that day's snapshot of each tab ----------------------
     def _active_on(self, day, *case_ids):
         for cid in case_ids:

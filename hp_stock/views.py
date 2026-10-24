@@ -10,8 +10,8 @@ from .models import (
     HPStockSettings, RECEIVED, SOURCE_MANUAL,
 )
 from .serializers import (
-    HPStockItemSerializer, HPStockRMAPartSerializer, OpencallPartsCountSerializer,
-    HPStockSettingsSerializer,
+    HPStockItemSerializer, HPStockItemListSerializer, HPStockRMAPartSerializer,
+    OpencallPartsCountSerializer, HPStockSettingsSerializer,
 )
 from rest_framework.views import APIView
 
@@ -280,6 +280,17 @@ class HPStockItemViewSet(viewsets.ModelViewSet):
     # (retrieve, transition, edit, delete) must keep resolving a hidden row by
     # id, or the In Transit tab could not act on the rows it lists.
     RECEIVED_FILTER_ACTIONS = {'list', 'summary', 'daily_region_counts', 'dc_cut_value_counts'}
+
+    def get_serializer_class(self):
+        # The list never loads inventory_details (see HPStockItemListSerializer);
+        # deferring it keeps the column out of the query as well as the payload.
+        if self.action == 'list':
+            return HPStockItemListSerializer
+        return super().get_serializer_class()
+
+    def filter_queryset(self, queryset):
+        queryset = super().filter_queryset(queryset)
+        return queryset.defer('inventory_details') if self.action == 'list' else queryset
 
     def get_queryset(self):
         """Scoped rows, plus the received-spare filter when the setting is on.
