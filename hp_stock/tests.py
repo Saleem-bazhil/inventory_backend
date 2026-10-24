@@ -111,29 +111,51 @@ class ReceivedSpareFilterTests(TestCase):
         salem = next(r for r in res.data['regions'] if r['region'] == 'salem')
         self.assertEqual(salem['in_transit'], 2)
 
-    # --- the opened-date filter (the table opens on today) --------------------
-    def test_date_filter_uses_the_ist_day(self):
-        """00:30 IST on the 24th is still the 23rd in UTC - it belongs to the 24th."""
-        self.transit.case_created_time = datetime(2020, 10, 23, 19, 0, tzinfo=dt_timezone.utc)
-        self.transit.save()
-        self.unknown.case_created_time = datetime(2020, 10, 23, 10, 0, tzinfo=dt_timezone.utc)
-        self.unknown.save()
-        self.assertEqual(self._case_ids(is_closed='false', date='2020-10-24'), ['C-TRANSIT'])
-        self.assertEqual(self._case_ids(is_closed='false', date='2020-10-23'), ['C-UNKNOWN'])
+    # --- the date shows that day's snapshot of each tab ----------------------
+    def _active_on(self, day, *case_ids):
+        for cid in case_ids:
+            OpencallActivePartCase.objects.create(report_date=day, case_id=cid, region='salem')
 
-    def test_in_transit_badge_follows_the_table_date(self):
+    def _closed_at(self, item, iso, status='CLOSED'):
+        item.status = status
+        item.transition_history = [{'to_status': status, 'timestamp': iso}]
+        item.save()
+
+    def test_active_tabs_list_that_days_opencall_active_cases(self):
         self._toggle(True)
-        self.transit.case_created_time = datetime(2020, 10, 24, 5, 0, tzinfo=dt_timezone.utc)
-        self.transit.save()
-        self.unknown.case_created_time = datetime(2020, 10, 20, 5, 0, tzinfo=dt_timezone.utc)
-        self.unknown.save()
-        res = self.client.get(ITEMS + 'summary/', {'transit_date': '2020-10-24'})
+        self._active_on('2020-10-23', 'C-RECEIVED')
+        self._active_on('2020-10-24', 'C-RECEIVED', 'C-TRANSIT')
+        self.assertEqual(self._case_ids(is_closed='false', date='2020-10-24'), ['C-RECEIVED'])
+        self.assertEqual(self._case_ids(is_closed='in_transit', date='2020-10-24'), ['C-TRANSIT'])
+        self.assertEqual(self._case_ids(is_closed='in_transit', date='2020-10-23'), [])
+        # No list pushed yet for the 25th: the 24th's list stands in.
+        self.assertEqual(self._case_ids(is_closed='in_transit', date='2020-10-25'), ['C-TRANSIT'])
+
+    def test_closed_tab_lists_cases_closed_that_ist_day(self):
+        # 19:00 UTC on the 23rd is 00:30 IST on the 24th.
+        self._closed_at(self.closed, '2020-10-23T19:00:00+00:00')
+        self.assertEqual(self._case_ids(is_closed='true', date='2020-10-24'), ['C-CLOSED'])
+        self.assertEqual(self._case_ids(is_closed='true', date='2020-10-23'), [])
+
+    def test_search_ignores_the_date(self):
+        self._closed_at(self.closed, '2020-10-23T19:00:00+00:00')
+        self.assertEqual(self._case_ids(is_closed='true', date='2021-01-01', search='C-CLOSED'), ['C-CLOSED'])
+
+    def test_summary_counts_the_days_snapshot(self):
+        self._toggle(True)
+        self._active_on('2020-10-24', 'C-TRANSIT')
+        self._closed_at(self.closed, '2020-10-24T06:00:00+00:00')
+        dc = self._item('C-DC')
+        self._closed_at(dc, '2020-10-20T06:00:00+00:00', status='DC_CUT_REQUEST')
+        res = self.client.get(ITEMS + 'summary/', {'list_date': '2020-10-24'})
         self.assertEqual(res.data['in_transit_total'], 1)
-        self.assertEqual(
-            self._case_ids(is_closed='in_transit', date='2020-10-24'), ['C-TRANSIT'],
-        )
-        # No date: the badge is the all-time count, as before.
-        self.assertEqual(self.client.get(ITEMS + 'summary/').data['in_transit_total'], 2)
+        self.assertEqual(res.data['closed_total'], 1)
+        self.assertEqual(res.data['dc_cut_request_total'], 0)
+        salem = next(r for r in res.data['regions'] if r['region'] == 'salem')
+        self.assertEqual((salem['closed'], salem['dc_cut_request'], salem['in_transit']), (1, 0, 1))
+        # No day: the all-time numbers, as before.
+        res = self.client.get(ITEMS + 'summary/')
+        self.assertEqual((res.data['in_transit_total'], res.data['dc_cut_request_total']), (2, 1))
 
     # --- hand-keyed rows survive the filter -----------------------------------
     def test_row_added_through_the_form_stays_visible(self):

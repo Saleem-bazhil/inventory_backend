@@ -114,23 +114,47 @@ def _ist_date_str(ts):
     return dt.astimezone(IST).date().isoformat()
 
 
-def opened_on_date_q(date_str):
-    """Rows whose case was opened on this IST calendar day (YYYY-MM-DD).
-
-    `case_created_time__date` would take the date in UTC (TIME_ZONE is UTC), so a
-    case opened before 05:30 IST landed on the previous day. Match the IST day's
-    bounds instead. Rows without a case time fall back to when the row was made.
-    """
+def _valid_day(date_str):
     try:
-        day = datetime.strptime(date_str, '%Y-%m-%d')
+        datetime.strptime(date_str, '%Y-%m-%d')
+        return True
     except ValueError:
-        return Q(pk__in=[])
-    start = day.replace(tzinfo=IST)
-    end = start + timedelta(days=1)
-    return (
-        Q(case_created_time__gte=start, case_created_time__lt=end)
-        | Q(case_created_time__isnull=True, created_at__gte=start, created_at__lt=end)
+        return False
+
+
+def active_case_ids_on(date_str):
+    """OpenCall's active part case ids for that day: the latest list pushed on or
+    before it, so today still works in the morning before today's report lands."""
+    day = (
+        OpencallActivePartCase.objects.filter(report_date__lte=date_str)
+        .aggregate(d=Max('report_date'))['d']
     )
+    if not day:
+        return []
+    return list(OpencallActivePartCase.objects.filter(report_date=day).values_list('case_id', flat=True))
+
+
+def ids_reaching_on(queryset, status, date_str):
+    """Ids of rows whose history shows them reaching `status` on that IST day."""
+    return [
+        row['id'] for row in queryset.values('id', 'transition_history')
+        if stage_reached_on_date(row['transition_history'], status, date_str)
+    ]
+
+
+def snapshot_on(queryset, tab, date_str):
+    """One day's view of a tab:
+      Active / In Transit  cases on OpenCall's active part list that day
+      DC Cut Request       cases that asked for the DC cut that day
+      Closed               cases closed that day
+    """
+    if not _valid_day(date_str):
+        return queryset.none()
+    if tab == 'true':
+        return queryset.filter(id__in=ids_reaching_on(queryset, 'CLOSED', date_str))
+    if tab == 'dc_cut_request':
+        return queryset.filter(id__in=ids_reaching_on(queryset, 'DC_CUT_REQUEST', date_str))
+    return queryset.filter(case_id__in=active_case_ids_on(date_str))
 
 
 def stage_reached_on_date(history, target_status, date_str):
@@ -363,14 +387,15 @@ class HPStockItemViewSet(viewsets.ModelViewSet):
             queryset = queryset.filter(case_id__in=active_ids) if active_ids is not None else queryset.none()
             queryset = annotate_part_price(queryset).filter(part_value_band_q(value_band_param))
 
-        # In the list, ?date= means "cases whose case was created on this day". The
-        # summary uses ?date= differently — "cases that reached a stage on this day"
-        # (counted from transition_history inside summary()), so it must NOT be
-        # narrowed to the creation date here or those transitions get filtered out.
-        # Likewise skip it when stage_on_date is driving a history-based stage filter,
-        # so a date-scoped card click isn't also narrowed by case-creation date.
-        if date_param and self.action != 'summary' and not stage_on_date_param:
-            queryset = queryset.filter(opened_on_date_q(date_param))
+        # In the list, ?date= shows that day's snapshot of the open tab (see
+        # snapshot_on). The summary uses ?date= for the stage cards instead, so it
+        # is skipped there, and so is a stage card's own history-based date. A
+        # search ignores it too: someone looking up a case id wants the case back
+        # whatever day it belongs to. Stage and value cards span the tabs, so with
+        # no tab there is nothing to scope.
+        if (date_param and self.action != 'summary' and not stage_on_date_param
+                and not search.strip() and is_closed_param in ('false', 'in_transit', 'dc_cut_request', 'true')):
+            queryset = snapshot_on(queryset, is_closed_param, date_param)
 
         if warranty_trade_param and warranty_trade_param.lower() != 'all':
             queryset = queryset.filter(warranty_trade=warranty_trade_param)
@@ -424,6 +449,10 @@ class HPStockItemViewSet(viewsets.ModelViewSet):
     @action(detail=False, methods=['get'])
     def summary(self, request):
         queryset = self.get_queryset()
+        # The table's day (`date` already means the stage cards' day here). With it,
+        # the In Transit badge and the region cards' DC Cut / Closed numbers count
+        # that day's snapshot, matching the rows the tabs list.
+        list_date = request.query_params.get('list_date', '').strip()
         total = queryset.count()
         active_total = queryset.exclude(status__in=['CLOSED', 'DC_CUT_REQUEST']).count()
         dc_cut_request_total = queryset.filter(status='DC_CUT_REQUEST').count()
@@ -509,12 +538,8 @@ class HPStockItemViewSet(viewsets.ModelViewSet):
                 .exclude(status__in=['CLOSED', 'DC_CUT_REQUEST'])
                 .exclude(RECEIVED_VISIBLE_Q)
             )
-            # The badge sits on the table's tab, so it follows the table's
-            # opened-date filter (sent as transit_date - `date` already means
-            # the stage cards' day here) and matches the rows the tab lists.
-            transit_date = request.query_params.get('transit_date', '').strip()
-            if transit_date:
-                hidden = hidden.filter(opened_on_date_q(transit_date))
+            if list_date:
+                hidden = snapshot_on(hidden, 'in_transit', list_date)
             in_transit_total = hidden.count()
             for row in hidden.values('region').annotate(n=Count('id')):
                 region_in_transit[row['region'] or ''] = row['n']
@@ -540,6 +565,16 @@ class HPStockItemViewSet(viewsets.ModelViewSet):
                 row['return_part_photo'] = by_stage.get('return_part_photo', 0)
                 row['issued'] = by_stage.get('issued', 0)
                 row['handover'] = by_stage.get('handover', 0)
+        if list_date:
+            day_counts = {}
+            for key, status, tab in (('dc_cut_request', 'DC_CUT_REQUEST', 'dc_cut_request'), ('closed', 'CLOSED', 'true')):
+                rows = snapshot_on(queryset.filter(status=status), tab, list_date)
+                by_region = {r['region'] or '': r['n'] for r in rows.values('region').annotate(n=Count('id'))}
+                day_counts[key] = by_region
+                for row in regions:
+                    row[key] = by_region.get(row.get('region') or '', 0)
+            dc_cut_request_total = sum(day_counts['dc_cut_request'].values())
+            closed_total = sum(day_counts['closed'].values())
         for row in regions:
             row['in_transit'] = region_in_transit.get(row.get('region') or '', 0)
         # A region whose rows are ALL in transit would otherwise lose its card
