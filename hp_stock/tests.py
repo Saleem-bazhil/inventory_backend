@@ -111,6 +111,15 @@ class ReceivedSpareFilterTests(TestCase):
         salem = next(r for r in res.data['regions'] if r['region'] == 'salem')
         self.assertEqual(salem['in_transit'], 2)
 
+    # --- the table counts work orders as well as parts ----------------------
+    def test_list_reports_work_orders_alongside_parts(self):
+        self.received.work_order_id = 'WO-1'; self.received.save()
+        self._item('C-RECEIVED', part_received_status=RECEIVED, work_order_id='WO-1')
+        self.working.work_order_id = 'WO-2'; self.working.save()
+        res = self.client.get(ITEMS, {'is_closed': 'false', 'per_page': 1})
+        self.assertEqual(res.data['total'], 5)  # parts, all pages
+        self.assertEqual(res.data['work_orders'], 2)  # WO-1 twice, WO-2, blanks not counted
+
     # --- the table leaves out the case's report history ----------------------
     def test_list_omits_inventory_details_but_the_item_keeps_it(self):
         self.received.inventory_details = '[01/10/2026] RTPL: x' * 1000

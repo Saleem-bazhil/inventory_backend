@@ -270,11 +270,28 @@ def verify_otp_local(phone: str, otp: str) -> bool:
     entry.delete()
     return True
 
+class HPStockItemPagination(CustomPageNumberPagination):
+    """Adds `work_orders`: how many work orders the listed parts belong to.
+
+    `total` counts rows, and a row is one spare part, so a case needing three
+    parts is three rows. OpenCall's numbers count work orders, so the table
+    shows both.
+    """
+
+    def get_paginated_response(self, data):
+        response = super().get_paginated_response(data)
+        rows = self.page.paginator.object_list.order_by()  # no ORDER BY inside DISTINCT
+        response.data['work_orders'] = (
+            rows.exclude(work_order_id='').values('work_order_id').distinct().count()
+        )
+        return response
+
+
 class HPStockItemViewSet(viewsets.ModelViewSet):
     queryset = HPStockItem.objects.all()
     serializer_class = HPStockItemSerializer
     permission_classes = [IsAuthenticated]
-    pagination_class = CustomPageNumberPagination
+    pagination_class = HPStockItemPagination
 
     # Only collection endpoints get the received-spare filter. Detail routes
     # (retrieve, transition, edit, delete) must keep resolving a hidden row by
