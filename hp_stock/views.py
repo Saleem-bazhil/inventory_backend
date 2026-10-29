@@ -58,8 +58,14 @@ WORKFLOW_STAGES = [
     ['HANDOVER'],
     ['RETURN_PART_PHOTO'],
     ['DC_CUT_REQUEST'],
+    ['SEALED_PART_PHOTO'],
     ['CLOSED'],
 ]
+
+# The DC Cut Request tab: cases that asked for the DC cut, plus approved ones
+# waiting on their sealed part photo. Neither is "active" work any more.
+DC_CUT_TAB_STATUSES = ['DC_CUT_REQUEST', 'SEALED_PART_PHOTO']
+NOT_ACTIVE_STATUSES = ['CLOSED', *DC_CUT_TAB_STATUSES]
 
 # For each status, every status at or past it in the workflow. A case sitting on
 # one of these has completed that stage, which is how "how many cases did X" is
@@ -430,11 +436,11 @@ class HPStockItemViewSet(viewsets.ModelViewSet):
             if is_closed_param == 'true':
                 queryset = queryset.filter(status='CLOSED')
             elif is_closed_param == 'dc_cut_request':
-                queryset = queryset.filter(status='DC_CUT_REQUEST')
+                queryset = queryset.filter(status__in=DC_CUT_TAB_STATUSES)
             elif is_closed_param in ('false', 'in_transit'):
                 # in_transit is the active set narrowed further in get_queryset();
                 # it must start from the same status scope as the Active tab.
-                queryset = queryset.exclude(status__in=['CLOSED', 'DC_CUT_REQUEST'])
+                queryset = queryset.exclude(status__in=NOT_ACTIVE_STATUSES)
 
         # Pending return: part taken by an engineer but not handed back yet. Its card
         # is always current-state (date-independent), so it ignores stage_on_date.
@@ -532,8 +538,8 @@ class HPStockItemViewSet(viewsets.ModelViewSet):
         # that day's snapshot, matching the rows the tabs list.
         list_date = request.query_params.get('list_date', '').strip()
         total = queryset.count()
-        active_total = queryset.exclude(status__in=['CLOSED', 'DC_CUT_REQUEST']).count()
-        dc_cut_request_total = queryset.filter(status='DC_CUT_REQUEST').count()
+        active_total = queryset.exclude(status__in=NOT_ACTIVE_STATUSES).count()
+        dc_cut_request_total = queryset.filter(status__in=DC_CUT_TAB_STATUSES).count()
         closed_total = queryset.filter(status='CLOSED').count()
 
         # Cases that have completed each workflow stage. The workflow is strictly
@@ -611,7 +617,7 @@ class HPStockItemViewSet(viewsets.ModelViewSet):
         in_transit_total = 0
         region_in_transit = {}
         if HPStockSettings.received_only():
-            open_rows = self._scoped_queryset().exclude(status__in=['CLOSED', 'DC_CUT_REQUEST'])
+            open_rows = self._scoped_queryset().exclude(status__in=NOT_ACTIVE_STATUSES)
             work_orders = work_orders_on(list_date) if list_date else None
             if work_orders is not None:
                 hidden = snapshot_on(open_rows, 'in_transit', list_date, work_orders)
@@ -625,8 +631,8 @@ class HPStockItemViewSet(viewsets.ModelViewSet):
 
         regions = list(queryset.values('region').annotate(
             total=Count('id'),
-            active=Count('id', filter=~Q(status__in=['CLOSED', 'DC_CUT_REQUEST'])),
-            dc_cut_request=Count('id', filter=Q(status='DC_CUT_REQUEST')),
+            active=Count('id', filter=~Q(status__in=NOT_ACTIVE_STATUSES)),
+            dc_cut_request=Count('id', filter=Q(status__in=DC_CUT_TAB_STATUSES)),
             closed=Count('id', filter=Q(status='CLOSED')),
             good_part_photo=Count('id', filter=Q(status__in=good_part_photo_done)),
             return_part_photo=Count('id', filter=Q(status__in=return_part_photo_done)),
@@ -646,8 +652,8 @@ class HPStockItemViewSet(viewsets.ModelViewSet):
                 row['handover'] = by_stage.get('handover', 0)
         if list_date:
             day_counts = {}
-            for key, status, tab in (('dc_cut_request', 'DC_CUT_REQUEST', 'dc_cut_request'), ('closed', 'CLOSED', 'true')):
-                rows = snapshot_on(queryset.filter(status=status), tab, list_date)
+            for key, statuses, tab in (('dc_cut_request', DC_CUT_TAB_STATUSES, 'dc_cut_request'), ('closed', ['CLOSED'], 'true')):
+                rows = snapshot_on(queryset.filter(status__in=statuses), tab, list_date)
                 by_region = {r['region'] or '': r['n'] for r in rows.values('region').annotate(n=Count('id'))}
                 day_counts[key] = by_region
                 for row in regions:
@@ -698,7 +704,7 @@ class HPStockItemViewSet(viewsets.ModelViewSet):
         if getattr(profile, 'role', '') != 'super_admin':
             return Response({})
 
-        dc_requests = self.get_queryset().filter(status='DC_CUT_REQUEST')
+        dc_requests = self.get_queryset().filter(status__in=DC_CUT_TAB_STATUSES)
         priced = annotate_part_price(dc_requests)
         counts = {
             f'part_value_{band.lower()}_total': priced.filter(part_value_band_q(band)).count()
@@ -832,7 +838,8 @@ class HPStockItemViewSet(viewsets.ModelViewSet):
             "DEFECTIVE_RETURN": ["HANDOVER"],
             "HANDOVER": ["RETURN_PART_PHOTO"],
             "RETURN_PART_PHOTO": ["DC_CUT_REQUEST"],
-            "DC_CUT_REQUEST": ["CLOSED"],
+            "DC_CUT_REQUEST": ["SEALED_PART_PHOTO"],
+            "SEALED_PART_PHOTO": ["CLOSED"],
         }
         
         requested_to_status = request.data.get("to_status")
@@ -848,12 +855,24 @@ class HPStockItemViewSet(viewsets.ModelViewSet):
                 status=400,
             )
 
-        if next_status == "CLOSED" and current_status == "DC_CUT_REQUEST":
+        # After the DC cut request: RMA approves, the part is sealed and
+        # photographed, and only then can the case close.
+        if next_status == "SEALED_PART_PHOTO":
             if not obj.dc_cut_approved:
                 return Response(
-                    {"detail": "DC Cut must be approved by the RMA team before closing the case."},
+                    {"detail": "DC Cut must be approved by the RMA team before the sealed part photo."},
                     status=400,
                 )
+            if not request.FILES.get("sealed_part_image"):
+                return Response({"detail": "A photo of the sealed part is required."}, status=400)
+        if next_status == "CLOSED":
+            if current_status == "DC_CUT_REQUEST":
+                return Response(
+                    {"detail": "Upload the sealed part photo before closing the case."},
+                    status=400,
+                )
+            if current_status == "SEALED_PART_PHOTO" and not obj.sealed_part_image:
+                return Response({"detail": "A photo of the sealed part is required."}, status=400)
 
         engineer_name = (request.data.get("engineer_name") or "").strip()
         remarks = (request.data.get("remarks") or "").strip()
@@ -942,11 +961,25 @@ class HPStockItemViewSet(viewsets.ModelViewSet):
                 if uploaded:
                     pending_uploads.append((field_name, "return_images", label, uploaded))
 
+        # Sealed part photos (the first is required, checked above)
+        sealed_photo_fields = [
+            ("sealed_part_image", "Sealed Part Photo"),
+            ("sealed_part_image_2", "Sealed Part Photo 2"),
+            ("sealed_part_image_3", "Sealed Part Photo 3"),
+        ]
+        if next_status == "SEALED_PART_PHOTO":
+            for field_name, label in sealed_photo_fields:
+                uploaded = request.FILES.get(field_name)
+                if uploaded:
+                    pending_uploads.append((field_name, "sealed_images", label, uploaded))
+
         uploaded_return_fields = []
+        uploaded_sealed_fields = []
         if pending_uploads:
             results = _upload_images_parallel([f for _, _, _, f in pending_uploads])
 
             return_images = []
+            sealed_images = []
             for (field_name, history_key, label, _), (saved_name, url) in zip(pending_uploads, results):
                 if field_name:
                     # The saved name, not the file object — assigning the object would
@@ -954,12 +987,18 @@ class HPStockItemViewSet(viewsets.ModelViewSet):
                     setattr(obj, field_name, saved_name)
                     if field_name.startswith("return_") and field_name != "return_part_image":
                         uploaded_return_fields.append(field_name)
+                    elif field_name.startswith("sealed_"):
+                        uploaded_sealed_fields.append(field_name)
                 if history_key == "return_images":
                     return_images.append({"label": label, "url": url})
+                elif history_key == "sealed_images":
+                    sealed_images.append({"label": label, "url": url})
                 else:
                     entry[history_key] = url
             if return_images:
                 entry["return_images"] = return_images
+            if sealed_images:
+                entry["sealed_images"] = sealed_images
 
         history.append(entry)
         obj.status = next_status
@@ -978,6 +1017,7 @@ class HPStockItemViewSet(viewsets.ModelViewSet):
         if getattr(obj, "return_part_image", None):
             save_fields.append("return_part_image")
         save_fields.extend(uploaded_return_fields)
+        save_fields.extend(uploaded_sealed_fields)
         if dc_cut_request_message is not None:
             save_fields.append("dc_cut_request_message")
             

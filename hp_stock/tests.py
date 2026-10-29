@@ -5,9 +5,11 @@ HP Stock query must behave exactly as it always has.
 """
 from datetime import datetime, timezone as dt_timezone
 from io import StringIO
+from unittest.mock import patch
 
 from django.contrib.auth.models import User
 from django.core.cache import cache
+from django.core.files.uploadedfile import SimpleUploadedFile
 from django.core.management import call_command
 from django.core.management.base import CommandError
 from django.utils import timezone
@@ -589,3 +591,92 @@ class CloseStaleHPStockCommandTests(TestCase):
             self._run(apply=True)
 
         self.assertEqual(HPStockItem.objects.get(case_id='C-GONE').status, 'PENDING')
+
+
+class SealedPartPhotoTransitionTests(TestCase):
+    """DC Cut Request -> (approved) -> Sealed Part Photo -> Closed."""
+
+    def setUp(self):
+        self.admin = make_user('sealer', 'admin')
+        self.client = APIClient()
+        self.client.force_authenticate(self.admin)
+        self.item = HPStockItem.objects.create(
+            case_id='C-SEAL', region='salem', status='DC_CUT_REQUEST',
+        )
+        # Storage is not under test: each upload "saves" under its own name.
+        patcher = patch(
+            'hp_stock.views._upload_images_parallel',
+            side_effect=lambda files: [(f'hp_stock_images/{f.name}', f'/media/{f.name}') for f in files],
+        )
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    def _photo(self, name='seal.jpg'):
+        return SimpleUploadedFile(name, b'img', content_type='image/jpeg')
+
+    def _transition(self, to_status, **files):
+        return self.client.post(
+            f'{ITEMS}{self.item.id}/transition/', {'to_status': to_status, **files}, format='multipart',
+        )
+
+    def test_dc_cut_request_can_no_longer_close_directly(self):
+        self.item.dc_cut_approved = True
+        self.item.save()
+
+        res = self._transition('CLOSED')
+
+        self.assertEqual(res.status_code, 400)
+        self.item.refresh_from_db()
+        self.assertEqual(self.item.status, 'DC_CUT_REQUEST')
+
+    def test_sealed_photo_needs_the_dc_cut_approved(self):
+        res = self._transition('SEALED_PART_PHOTO', sealed_part_image=self._photo())
+
+        self.assertEqual(res.status_code, 400)
+        self.item.refresh_from_db()
+        self.assertEqual(self.item.status, 'DC_CUT_REQUEST')
+
+    def test_sealed_photo_needs_a_photo(self):
+        self.item.dc_cut_approved = True
+        self.item.save()
+
+        res = self._transition('SEALED_PART_PHOTO')
+
+        self.assertEqual(res.status_code, 400)
+
+    def test_full_path_to_closed(self):
+        self.item.dc_cut_approved = True
+        self.item.save()
+
+        res = self._transition(
+            'SEALED_PART_PHOTO',
+            sealed_part_image=self._photo('a.jpg'), sealed_part_image_3=self._photo('c.jpg'),
+        )
+        self.assertEqual(res.status_code, 200, res.data)
+        self.item.refresh_from_db()
+        self.assertEqual(self.item.status, 'SEALED_PART_PHOTO')
+        self.assertEqual(self.item.sealed_part_image.name, 'hp_stock_images/a.jpg')
+        self.assertFalse(self.item.sealed_part_image_2)
+        self.assertEqual(self.item.sealed_part_image_3.name, 'hp_stock_images/c.jpg')
+        self.assertEqual(
+            [img['label'] for img in self.item.transition_history[-1]['sealed_images']],
+            ['Sealed Part Photo', 'Sealed Part Photo 3'],
+        )
+
+        res = self._transition('CLOSED')
+        self.assertEqual(res.status_code, 200, res.data)
+        self.item.refresh_from_db()
+        self.assertEqual(self.item.status, 'CLOSED')
+
+    def test_waiting_for_the_seal_stays_on_the_dc_cut_tab(self):
+        self.item.status = 'SEALED_PART_PHOTO'
+        self.item.save()
+
+        dc_tab = self.client.get(ITEMS, {'is_closed': 'dc_cut_request'}).data['items']
+        active_tab = self.client.get(ITEMS, {'is_closed': 'false'}).data['items']
+        summary = self.client.get(ITEMS + 'summary/').data
+
+        self.assertEqual([row['case_id'] for row in dc_tab], ['C-SEAL'])
+        self.assertEqual(active_tab, [])
+        self.assertEqual(summary['dc_cut_request_total'], 1)
+        self.assertEqual(summary['active_total'], 0)

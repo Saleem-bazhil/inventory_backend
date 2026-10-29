@@ -109,7 +109,7 @@ class Command(BaseCommand):
 
         cutoff = timezone.now() - timedelta(days=grace_days)
 
-        queryset = HPStockItem.objects.exclude(status__in=['CLOSED', 'DC_CUT_REQUEST'])
+        queryset = HPStockItem.objects.exclude(status__in=['CLOSED', 'DC_CUT_REQUEST', 'SEALED_PART_PHOTO'])
         if region:
             queryset = queryset.filter(region=region)
 

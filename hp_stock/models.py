@@ -55,7 +55,13 @@ class HPStockItem(models.Model):
     dc_cut_request_message = models.TextField(blank=True, default="", verbose_name="DC Cut Request Message")
     dc_cut_approved = models.BooleanField(default=False, verbose_name="DC Cut Approved")
     dc_cut_chat = models.JSONField(default=list, blank=True, verbose_name="DC Cut Chat Logs")
-    
+    # Sealed part photos, taken after the DC cut is approved and before closing:
+    # the part sealed with its labels. The first is required to reach
+    # SEALED_PART_PHOTO; the other two are optional label close-ups.
+    sealed_part_image = models.FileField(upload_to="hp_stock_images/", blank=True, null=True, verbose_name="Sealed Part Photo")
+    sealed_part_image_2 = models.FileField(upload_to="hp_stock_images/", blank=True, null=True, verbose_name="Sealed Part Photo 2")
+    sealed_part_image_3 = models.FileField(upload_to="hp_stock_images/", blank=True, null=True, verbose_name="Sealed Part Photo 3")
+
     region = models.CharField(max_length=20, blank=True, default="", verbose_name="Region")
     status = models.CharField(
         max_length=30,
@@ -70,6 +76,7 @@ class HPStockItem(models.Model):
             ("HANDOVER", "Part Handover by Engineer"),
             ("RETURN_PART_PHOTO", "Return Part Photo"),
             ("DC_CUT_REQUEST", "DC Cut Request"),
+            ("SEALED_PART_PHOTO", "Sealed Part Photo"),
             ("CLOSED", "Close the Case"),
         ],
         default="PENDING",
