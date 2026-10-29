@@ -7,7 +7,7 @@ from django.db.models.functions import TruncDate
 from django.utils import timezone
 from .models import (
     HPStockItem, HPStockRMAPart, OpencallPartsCount, OpencallActivePartCase,
-    HPStockSettings, RECEIVED, SOURCE_MANUAL,
+    OpencallActiveWorkOrder, HPStockSettings, RECEIVED, SOURCE_MANUAL,
 )
 from .serializers import (
     HPStockItemSerializer, HPStockItemListSerializer, HPStockRMAPartSerializer,
@@ -142,11 +142,47 @@ def ids_reaching_on(queryset, status, date_str):
     ]
 
 
-def snapshot_on(queryset, tab, date_str):
+# A part someone has in hand: marked received at the desk, or work already
+# started on it. It stays on the Active tab even while that day's Flex export
+# still calls its work order in transit, or it would bounce back to the desk.
+HELD_Q = Q(part_received_source=SOURCE_MANUAL) | ~Q(status='PENDING')
+
+
+def work_orders_on(date_str):
+    """(received, waiting) work order ids from OpenCall's list for that day, or
+    None when there is none to go by.
+
+    Only used when it is the same day as the case list in force: until OpenCall
+    pushes work orders (or on days before it started), the tabs keep going by
+    case id.
+    """
+    if not _valid_day(date_str):
+        return None
+    case_day = (
+        OpencallActivePartCase.objects.filter(report_date__lte=date_str)
+        .aggregate(d=Max('report_date'))['d']
+    )
+    wo_day = (
+        OpencallActiveWorkOrder.objects.filter(report_date__lte=date_str)
+        .aggregate(d=Max('report_date'))['d']
+    )
+    if not wo_day or wo_day != case_day:
+        return None
+    received, waiting = [], []
+    for wo, got in OpencallActiveWorkOrder.objects.filter(report_date=wo_day).values_list('work_order_id', 'received'):
+        (received if got else waiting).append(wo)
+    return received, waiting
+
+
+def snapshot_on(queryset, tab, date_str, work_orders=None):
     """One day's view of a tab:
-      Active / In Transit  cases on OpenCall's active part list that day
+      Active / In Transit  OpenCall's work orders that day, split the way
+                           OpenCall splits them (spare received or not), so the
+                           Active tab's work orders are the card's Active number.
+                           Without a work order list: the day's active case ids.
       DC Cut Request       cases that asked for the DC cut that day
       Closed               cases closed that day
+    `work_orders` is work_orders_on(date_str), when the caller already has it.
     """
     if not _valid_day(date_str):
         return queryset.none()
@@ -154,7 +190,14 @@ def snapshot_on(queryset, tab, date_str):
         return queryset.filter(id__in=ids_reaching_on(queryset, 'CLOSED', date_str))
     if tab == 'dc_cut_request':
         return queryset.filter(id__in=ids_reaching_on(queryset, 'DC_CUT_REQUEST', date_str))
-    return queryset.filter(case_id__in=active_case_ids_on(date_str))
+    if work_orders is None:
+        work_orders = work_orders_on(date_str)
+    if work_orders is None:
+        return queryset.filter(case_id__in=active_case_ids_on(date_str))
+    received, waiting = work_orders
+    if tab == 'in_transit':
+        return queryset.filter(Q(work_order_id__in=waiting) & ~HELD_Q)
+    return queryset.filter(Q(work_order_id__in=received) | (Q(work_order_id__in=waiting) & HELD_Q))
 
 
 def stage_reached_on_date(history, target_status, date_str):
@@ -318,10 +361,13 @@ class HPStockItemViewSet(viewsets.ModelViewSet):
         this returns `_scoped_queryset()` untouched: the exact query HP Stock has
         always run, which is what makes turning it off a clean rollback.
         """
+        self._split_by_work_order = False
         queryset = self._scoped_queryset()
         if getattr(self, 'action', None) not in self.RECEIVED_FILTER_ACTIONS:
             return queryset
         if not HPStockSettings.received_only():
+            return queryset
+        if self._split_by_work_order:
             return queryset
         # The In Transit tab is the receiving desk - it lists exactly what the
         # filter hides, so nothing is ever invisible, only moved one tab over.
@@ -423,7 +469,11 @@ class HPStockItemViewSet(viewsets.ModelViewSet):
         # no tab there is nothing to scope.
         if (date_param and self.action != 'summary' and not stage_on_date_param
                 and not search.strip() and is_closed_param in ('false', 'in_transit', 'dc_cut_request', 'true')):
-            queryset = snapshot_on(queryset, is_closed_param, date_param)
+            work_orders = work_orders_on(date_param) if is_closed_param in ('false', 'in_transit') else None
+            queryset = snapshot_on(queryset, is_closed_param, date_param, work_orders)
+            # Split by OpenCall's work orders, the tab is already exactly the
+            # received or the waiting set - get_queryset must not filter again.
+            self._split_by_work_order = work_orders is not None
 
         if warranty_trade_param and warranty_trade_param.lower() != 'all':
             queryset = queryset.filter(warranty_trade=warranty_trade_param)
@@ -561,13 +611,14 @@ class HPStockItemViewSet(viewsets.ModelViewSet):
         in_transit_total = 0
         region_in_transit = {}
         if HPStockSettings.received_only():
-            hidden = (
-                self._scoped_queryset()
-                .exclude(status__in=['CLOSED', 'DC_CUT_REQUEST'])
-                .exclude(RECEIVED_VISIBLE_Q)
-            )
-            if list_date:
-                hidden = snapshot_on(hidden, 'in_transit', list_date)
+            open_rows = self._scoped_queryset().exclude(status__in=['CLOSED', 'DC_CUT_REQUEST'])
+            work_orders = work_orders_on(list_date) if list_date else None
+            if work_orders is not None:
+                hidden = snapshot_on(open_rows, 'in_transit', list_date, work_orders)
+            else:
+                hidden = open_rows.exclude(RECEIVED_VISIBLE_Q)
+                if list_date:
+                    hidden = snapshot_on(hidden, 'in_transit', list_date)
             in_transit_total = hidden.count()
             for row in hidden.values('region').annotate(n=Count('id')):
                 region_in_transit[row['region'] or ''] = row['n']
@@ -1184,6 +1235,30 @@ class OpencallPartsCountViewSet(viewsets.ModelViewSet):
                 region=(r.get('region') or ''),
             )
             for r in rows if r.get('case_id')
+        ], ignore_conflicts=True)
+        return Response({'written': len(rows)})
+
+    @action(detail=False, methods=['post'])
+    def bulk_replace_active_work_orders(self, request):
+        """OpenCall pushes the work orders behind its active part cases for a
+        report date, each flagged with whether its spare is received."""
+        payload = request.data
+        rows = payload if isinstance(payload, list) else payload.get('rows', [])
+        if not rows:
+            return Response({'written': 0})
+        report_date = rows[0].get('report_date')
+        if not report_date:
+            return Response({'written': 0})
+        OpencallActiveWorkOrder.objects.filter(report_date=report_date).delete()
+        OpencallActiveWorkOrder.objects.bulk_create([
+            OpencallActiveWorkOrder(
+                report_date=report_date,
+                work_order_id=str(r.get('work_order_id') or ''),
+                case_id=str(r.get('case_id') or ''),
+                region=(r.get('region') or ''),
+                received=bool(r.get('received')),
+            )
+            for r in rows if r.get('work_order_id')
         ], ignore_conflicts=True)
         return Response({'written': len(rows)})
 

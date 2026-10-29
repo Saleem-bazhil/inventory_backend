@@ -188,6 +188,29 @@ class OpencallActivePartCase(models.Model):
         return f"{self.report_date} {self.case_id} ({self.region})"
 
 
+class OpencallActiveWorkOrder(models.Model):
+    """The work orders behind OpenCall's "Active Part Cases" for a report date.
+
+    `received` is OpenCall's own call (a spare on the work order is RCV_SPARE in
+    that day's Flex export), so the received work orders are exactly what the
+    region cards' Active number counts. HP Stock's Active and In Transit tabs
+    are built from this list when it exists, so the tab and the card agree.
+    """
+    report_date = models.DateField(db_index=True, verbose_name="Report Date")
+    work_order_id = models.CharField(max_length=100, db_index=True, verbose_name="Work Order ID")
+    case_id = models.CharField(max_length=100, blank=True, default="", verbose_name="Case ID")
+    region = models.CharField(max_length=50, blank=True, default="", verbose_name="Region")
+    received = models.BooleanField(default=False, verbose_name="Spare Received")
+
+    class Meta:
+        unique_together = ("report_date", "work_order_id")
+        verbose_name = "OpenCall Active Work Order"
+        verbose_name_plural = "OpenCall Active Work Orders"
+
+    def __str__(self):
+        return f"{self.report_date} {self.work_order_id} ({'received' if self.received else 'waiting'})"
+
+
 HP_STOCK_SETTINGS_CACHE_KEY = "hp_stock:received_spare_only"
 
 

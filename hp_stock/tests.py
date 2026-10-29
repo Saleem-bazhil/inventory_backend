@@ -17,7 +17,7 @@ from rest_framework.test import APIClient
 # Absolute import: hp_stock is a namespace package (no __init__.py), so the test
 # loader has no parent package to resolve a relative import against.
 from hp_stock.models import (
-    HPStockItem, HPStockSettings, OpencallActivePartCase,
+    HPStockItem, HPStockSettings, OpencallActivePartCase, OpencallActiveWorkOrder,
     RECEIVED, IN_TRANSIT, SOURCE_MANUAL,
 )
 
@@ -110,6 +110,54 @@ class ReceivedSpareFilterTests(TestCase):
         self.assertTrue(res.data['received_spare_only'])
         salem = next(r for r in res.data['regions'] if r['region'] == 'salem')
         self.assertEqual(salem['in_transit'], 2)
+
+    # --- with OpenCall's work orders, the tabs split exactly like OpenCall ---
+    def _work_orders_on(self, day, **received_by_wo):
+        for wo, got in received_by_wo.items():
+            OpencallActiveWorkOrder.objects.create(report_date=day, work_order_id=wo, received=got)
+
+    def _wo(self, item, wo):
+        item.work_order_id = wo
+        item.save()
+
+    def test_tabs_split_by_opencalls_work_orders(self):
+        self._toggle(True)
+        self._wo(self.received, 'WO-A')   # OpenCall: received
+        self._wo(self.unknown, 'WO-B')    # OpenCall: received, HP Stock never heard
+        self._wo(self.transit, 'WO-C')    # OpenCall: waiting
+        self._wo(self.working, 'WO-D')    # OpenCall: waiting, but work has started
+        self._item('C-RECEIVED', part_received_status=RECEIVED, work_order_id='WO-OLD')
+        desk = self._item('C-DESK', part_received_status=RECEIVED, part_received_source=SOURCE_MANUAL, work_order_id='WO-E')
+        self._active_on('2020-10-24', 'C-RECEIVED', 'C-UNKNOWN', 'C-TRANSIT', 'C-WORKING', 'C-DESK')
+        self._work_orders_on('2020-10-24', **{'WO-A': True, 'WO-B': True, 'WO-C': False, 'WO-D': False, 'WO-E': False})
+        # The older work order on C-RECEIVED is not on OpenCall's list, so it drops out.
+        self.assertEqual(
+            self._case_ids(is_closed='false', date='2020-10-24'),
+            ['C-DESK', 'C-RECEIVED', 'C-UNKNOWN', 'C-WORKING'],
+        )
+        self.assertEqual(self._case_ids(is_closed='in_transit', date='2020-10-24'), ['C-TRANSIT'])
+        res = self.client.get(ITEMS, {'is_closed': 'false', 'date': '2020-10-24'})
+        self.assertEqual(res.data['work_orders'], 4)  # WO-A, WO-B + the two held ones
+        res = self.client.get(ITEMS + 'summary/', {'list_date': '2020-10-24'})
+        self.assertEqual(res.data['in_transit_total'], 1)
+
+    def test_without_that_days_work_orders_the_tabs_go_by_case(self):
+        self._toggle(True)
+        self._wo(self.transit, 'WO-C')
+        self._work_orders_on('2020-10-23', **{'WO-C': True})   # an older day only
+        self._active_on('2020-10-24', 'C-TRANSIT')
+        self.assertEqual(self._case_ids(is_closed='in_transit', date='2020-10-24'), ['C-TRANSIT'])
+
+    def test_opencall_replaces_a_days_work_orders(self):
+        url = '/api/hp-stock/parts-call-counts/bulk_replace_active_work_orders/'
+        self._work_orders_on('2020-10-24', **{'WO-X': True})
+        res = self.client.post(url, [
+            {'report_date': '2020-10-24', 'work_order_id': 'WO-1', 'case_id': 'C1', 'region': 'salem', 'received': True},
+            {'report_date': '2020-10-24', 'work_order_id': 'WO-2', 'case_id': 'C2', 'region': 'salem', 'received': False},
+        ], format='json')
+        self.assertEqual(res.status_code, 200)
+        got = dict(OpencallActiveWorkOrder.objects.filter(report_date='2020-10-24').values_list('work_order_id', 'received'))
+        self.assertEqual(got, {'WO-1': True, 'WO-2': False})
 
     # --- the table counts work orders as well as parts ----------------------
     def test_list_reports_work_orders_alongside_parts(self):
