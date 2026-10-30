@@ -19,7 +19,7 @@ from rest_framework.test import APIClient
 # Absolute import: hp_stock is a namespace package (no __init__.py), so the test
 # loader has no parent package to resolve a relative import against.
 from hp_stock.models import (
-    HPStockItem, HPStockSettings, OpencallActivePartCase, OpencallActiveWorkOrder,
+    HPStockItem, HPStockRMAPart, HPStockSettings, OpencallActivePartCase, OpencallActiveWorkOrder,
     RECEIVED, IN_TRANSIT, SOURCE_MANUAL,
 )
 
@@ -597,6 +597,7 @@ class SealedPartPhotoTransitionTests(TestCase):
     """DC Cut Request -> (approved) -> Sealed Part Photo -> Closed."""
 
     def setUp(self):
+        cache.clear()
         self.admin = make_user('sealer', 'admin')
         self.client = APIClient()
         self.client.force_authenticate(self.admin)
@@ -680,3 +681,52 @@ class SealedPartPhotoTransitionTests(TestCase):
         self.assertEqual(active_tab, [])
         self.assertEqual(summary['dc_cut_request_total'], 1)
         self.assertEqual(summary['active_total'], 0)
+
+
+class SingleDateCardsTests(TestCase):
+    """With a day picked, Pending Return and the value bands follow that day."""
+
+    def setUp(self):
+        cache.clear()
+        self.boss = make_user('boss', 'super_admin')
+        self.client = APIClient()
+        self.client.force_authenticate(self.boss)
+
+    def _taken(self, case_id, day, status='ISSUED'):
+        return HPStockItem.objects.create(
+            case_id=case_id, region='salem', status=status,
+            transition_history=[{'from_status': 'GOOD_PART_PHOTO', 'to_status': 'ISSUED',
+                                 'timestamp': f'{day}T06:00:00+00:00'}],
+        )
+
+    def test_pending_return_counts_parts_taken_that_day_still_out(self):
+        self._taken('C-TODAY-OUT', '2026-10-29')
+        self._taken('C-TODAY-BACK', '2026-10-29', status='HANDOVER')
+        self._taken('C-EARLIER-OUT', '2026-10-27', status='WORK_STATUS')
+
+        dated = self.client.get(ITEMS + 'summary/', {'date': '2026-10-29'}).data
+        earlier = self.client.get(ITEMS + 'summary/', {'date': '2026-10-27'}).data
+        undated = self.client.get(ITEMS + 'summary/').data
+        listed = self.client.get(ITEMS, {'stage_done': 'PENDING_RETURN', 'stage_on_date': '2026-10-29'}).data
+
+        self.assertEqual(dated['pending_return_total'], 1)
+        self.assertEqual(dated['regions'][0]['pending_return'], 1)
+        self.assertEqual(earlier['pending_return_total'], 1)
+        self.assertEqual(undated['pending_return_total'], 2)
+        self.assertEqual([row['case_id'] for row in listed['items']], ['C-TODAY-OUT'])
+
+    def test_value_bands_follow_the_days_active_cases(self):
+        HPStockRMAPart.objects.create(part_number='P-LOW', price=100)
+        for case_id in ('C-OLD', 'C-NEW'):
+            HPStockItem.objects.create(case_id=case_id, region='salem', good_part_number='P-LOW')
+        OpencallActivePartCase.objects.create(report_date='2026-10-27', case_id='C-OLD')
+        OpencallActivePartCase.objects.create(report_date='2026-10-29', case_id='C-NEW')
+        OpencallActivePartCase.objects.create(report_date='2026-10-29', case_id='C-OLD')
+
+        old_day = self.client.get(ITEMS + 'summary/', {'list_date': '2026-10-28'}).data
+        latest = self.client.get(ITEMS + 'summary/').data
+        listed = self.client.get(ITEMS, {'value_band': 'LOW', 'date': '2026-10-27'}).data
+
+        self.assertEqual(old_day['part_value_low_total'], 1)
+        self.assertEqual(latest['part_value_low_total'], 2)
+        self.assertEqual([row['case_id'] for row in listed['items']], ['C-OLD'])

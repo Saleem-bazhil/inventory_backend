@@ -255,6 +255,14 @@ def opencall_active_case_ids():
     return OpencallActivePartCase.objects.filter(report_date=latest).values_list('case_id', flat=True)
 
 
+def active_case_ids_for(date_str):
+    """The active part case ids the value bands cover: that day's list when a
+    valid day is given, otherwise OpenCall's latest (None when there is none)."""
+    if date_str and _valid_day(date_str):
+        return active_case_ids_on(date_str)
+    return opencall_active_case_ids()
+
+
 def part_value_band_q(band: str) -> Q:
     """Q object selecting rows whose annotated `part_price` falls in `band`."""
     low, high = PART_VALUE_BANDS[band]
@@ -442,10 +450,12 @@ class HPStockItemViewSet(viewsets.ModelViewSet):
                 # it must start from the same status scope as the Active tab.
                 queryset = queryset.exclude(status__in=NOT_ACTIVE_STATUSES)
 
-        # Pending return: part taken by an engineer but not handed back yet. Its card
-        # is always current-state (date-independent), so it ignores stage_on_date.
+        # Pending return: part taken by an engineer but not handed back yet.
         if stage_done_param == 'PENDING_RETURN':
             queryset = queryset.filter(status__in=PENDING_RETURN_STATUSES)
+            # Dated card: only the parts taken (ISSUED) on that day that are still out.
+            if stage_on_date_param:
+                queryset = queryset.filter(id__in=ids_reaching_on(queryset, 'ISSUED', stage_on_date_param))
         # Cases that have completed a given stage — the counterpart of the stage
         # counts in summary(), so clicking a count card lists exactly those cases.
         elif stage_done_param in STAGES_AT_OR_PAST:
@@ -463,7 +473,7 @@ class HPStockItemViewSet(viewsets.ModelViewSet):
 
         # Part value band — derived from price, so it stays super-admin-only.
         if value_band_param in PART_VALUE_BANDS and role == 'super_admin':
-            active_ids = opencall_active_case_ids()
+            active_ids = active_case_ids_for(date_param)
             queryset = queryset.filter(case_id__in=active_ids) if active_ids is not None else queryset.none()
             queryset = annotate_part_price(queryset).filter(part_value_band_q(value_band_param))
 
@@ -567,7 +577,7 @@ class HPStockItemViewSet(viewsets.ModelViewSet):
             # Pull only the history (small JSON) for the rows in scope, then count in
             # Python — JSONField can't be filtered on nested timestamp dates portably
             # (sqlite dev vs postgres prod). region is fetched too for the breakdown.
-            history_rows = list(queryset.values('region', 'transition_history'))
+            history_rows = list(queryset.values('region', 'status', 'transition_history'))
 
             stage_totals = {}
             region_stage = {}  # region -> {key: count}
@@ -581,6 +591,16 @@ class HPStockItemViewSet(viewsets.ModelViewSet):
                         region_stage[reg][key] = region_stage[reg].get(key, 0) + 1
                 stage_totals[key] = total_for_stage
 
+            # Pending return for the day: parts taken (ISSUED) that day that are
+            # still out with the engineer now.
+            pending_return_total = 0
+            for r in history_rows:
+                if r['status'] in PENDING_RETURN_STATUSES and stage_reached_on_date(r['transition_history'], 'ISSUED', date_param):
+                    pending_return_total += 1
+                    reg = r['region'] or ''
+                    region_stage.setdefault(reg, {})
+                    region_stage[reg]['pending_return'] = region_stage[reg].get('pending_return', 0) + 1
+
             good_part_photo_total = stage_totals['good_part_photo']
             return_part_photo_total = stage_totals['return_part_photo']
             issued_total = stage_totals['issued']
@@ -590,20 +610,18 @@ class HPStockItemViewSet(viewsets.ModelViewSet):
             return_part_photo_total = queryset.filter(status__in=return_part_photo_done).count()
             issued_total = queryset.filter(status__in=issued_done).count()
             handover_total = queryset.filter(status__in=handover_done).count()
-
-        # Pending return: part taken by an engineer but not yet handed back. This is a
-        # current-state figure ("who is still holding a part right now"), so it stays
-        # status-based even when a date filter reshapes the other stage cards.
-        pending_return_total = queryset.filter(status__in=PENDING_RETURN_STATUSES).count()
+            # Without a date: every part an engineer is holding right now.
+            pending_return_total = queryset.filter(status__in=PENDING_RETURN_STATUSES).count()
 
         # Part value counts are derived from price, which is super-admin-only, so
         # they are omitted entirely for everyone else.
         part_value_totals = {}
         profile = getattr(request.user, 'userprofile', None)
         if getattr(profile, 'role', '') == 'super_admin':
-            # Part-value bands cover only OpenCall's current Active Part Cases �
-            # the same set behind the region cards' Active number.
-            active_ids = opencall_active_case_ids()
+            # Part-value bands cover only OpenCall's Active Part Cases - the same
+            # set behind the region cards' Active number - for the table's day
+            # when one is picked, otherwise the latest.
+            active_ids = active_case_ids_for(list_date)
             scoped = queryset.filter(case_id__in=active_ids) if active_ids is not None else queryset.none()
             priced = annotate_part_price(scoped)
             part_value_totals = {
@@ -650,6 +668,7 @@ class HPStockItemViewSet(viewsets.ModelViewSet):
                 row['return_part_photo'] = by_stage.get('return_part_photo', 0)
                 row['issued'] = by_stage.get('issued', 0)
                 row['handover'] = by_stage.get('handover', 0)
+                row['pending_return'] = by_stage.get('pending_return', 0)
         if list_date:
             day_counts = {}
             for key, statuses, tab in (('dc_cut_request', DC_CUT_TAB_STATUSES, 'dc_cut_request'), ('closed', ['CLOSED'], 'true')):
